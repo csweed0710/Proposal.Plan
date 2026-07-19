@@ -10,6 +10,7 @@ import ClientDetail from "./pages/ClientDetail";
 import Match from "./pages/Match";
 import Cases from "./pages/Cases";
 import CaseDetail from "./pages/CaseDetail";
+import References from "./pages/References";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/match" element={<Match />} />
         <Route path="/cases" element={<Cases />} />
         <Route path="/cases/:id" element={<CaseDetail />} />
+        <Route path="/references" element={<References />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

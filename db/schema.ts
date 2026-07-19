@@ -118,6 +118,22 @@ export const chapterVersions = mysqlTable("chapter_versions", {
 });
 
 // ============================================================================
+// 參考資料庫：得標範本／評分文件／委員意見／數據文獻
+// 只存文字內容（AI 用），原始檔案由使用者自行留存
+// ============================================================================
+export const referenceDocs = mysqlTable("reference_docs", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 200 }).notNull(),
+  kind: varchar("kind", { length: 20 }).notNull(), // example / rubric_doc / feedback / data
+  grantId: bigint("grant_id", { mode: "number", unsigned: true }),   // null＝全部通用
+  caseId: bigint("case_id", { mode: "number", unsigned: true }),     // 委員意見來源案件（可空）
+  filename: varchar("filename", { length: 200 }),
+  textContent: mediumtext("text_content"),                            // 全文（AI 用）
+  note: text("note"),                                                 // 使用者備註（這份好在哪裡）
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ============================================================================
 // 審核紀錄：每一輪審核都留痕，形成迭代歷史
 // ============================================================================
 export const reviews = mysqlTable("reviews", {
@@ -140,3 +156,5 @@ export type InsertCase = typeof cases.$inferInsert;
 export type Review = typeof reviews.$inferSelect;
 export type InsertReview = typeof reviews.$inferInsert;
 export type ChapterVersion = typeof chapterVersions.$inferSelect;
+export type ReferenceDocRow = typeof referenceDocs.$inferSelect;
+export type InsertReferenceDoc = typeof referenceDocs.$inferInsert;

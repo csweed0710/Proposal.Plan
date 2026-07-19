@@ -3,12 +3,13 @@ import { z } from "zod";
 import { eq, desc, and } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { grantPrograms, clients, cases, reviews, chapterVersions } from "@db/schema";
+import { grantPrograms, clients, cases, reviews, chapterVersions, referenceDocs } from "@db/schema";
 import { matchAll } from "./engines/matching";
 import { generateIntake } from "./engines/intake";
 import { draftChapter } from "./engines/writer";
 import { runReview } from "./engines/review";
 import { applyRevision } from "./engines/revise";
+import { pickRefs, docxToText } from "./engines/reference";
 import { chat, llmStatus } from "./llm";
 import { exportCase } from "./engines/exporter";
 import type { CaseChapter, ChapterSpec, RubricItem } from "../contracts/types";
@@ -368,13 +369,15 @@ export const caseRouter = createRouter({
       if (!client || !grant) throw new Error("資料缺漏");
       const ch = (k.chapters ?? []).find((c) => c.key === input.chapterKey);
       if (!ch) throw new Error("章節不存在");
-      const { content, usedAI } = await draftChapter(ch, k.intakeQA ?? [], client, grant, k.rubricSnapshot ?? []);
+      const allRefs = await getDb().query.referenceDocs.findMany();
+      const refs = pickRefs(allRefs, grant.id, ["example", "data", "feedback", "rubric_doc"]);
+      const { content, usedAI, usedRefs } = await draftChapter(ch, k.intakeQA ?? [], client, grant, k.rubricSnapshot ?? [], refs);
       const chapters = (k.chapters ?? []).map((c) =>
         c.key === input.chapterKey ? { ...c, content, status: "draft" as const } : c,
       );
       await snapshotChapters(input.id, k.chapters ?? [], chapters, "AI 起草");
       await getDb().update(cases).set({ chapters, status: "draft" }).where(eq(cases.id, input.id));
-      return { content, usedAI };
+      return { content, usedAI, usedRefs };
     }),
 
   // ---- 案件 pipeline：狀態流轉 ----
@@ -398,12 +401,33 @@ export const caseRouter = createRouter({
       reviewFeedback: z.string().default(""),
     }))
     .mutation(async ({ input }) => {
+      const k = await mustGetCase(input.id);
       await getDb().update(cases).set({
         status: input.status,
         submittedAt: input.submittedAt ? new Date(input.submittedAt) : null,
         resultAmount: input.resultAmount,
         reviewFeedback: input.reviewFeedback.trim() || null,
       }).where(eq(cases.id, input.id));
+      // 委員意見自動歸檔到參考資料庫——下次投同一補助案，起草與修改自動回應
+      const fb = input.reviewFeedback.trim();
+      if (fb) {
+        const existing = await getDb().query.referenceDocs.findFirst({
+          where: and(eq(referenceDocs.caseId, input.id), eq(referenceDocs.kind, "feedback")),
+        });
+        if (existing) {
+          await getDb().update(referenceDocs).set({ textContent: fb }).where(eq(referenceDocs.id, existing.id));
+        } else {
+          await getDb().insert(referenceDocs).values({
+            title: `「${k.title}」委員意見`,
+            kind: "feedback",
+            grantId: k.grantId,
+            caseId: input.id,
+            filename: null,
+            textContent: fb,
+            note: "送件結果登錄時自動歸檔",
+          });
+        }
+      }
       return { ok: true };
     }),
 
@@ -504,7 +528,9 @@ export const reviewRouter = createRouter({
         chapterAnswers[q.chapterKey] = [...(chapterAnswers[q.chapterKey] ?? []), `${q.question}：${q.answer.trim()}`];
       }
     }
-    const rev = await applyRevision(k.chapters ?? [], latest.issues ?? [], chapterAnswers);
+    const allRefs = await getDb().query.referenceDocs.findMany();
+    const refs = pickRefs(allRefs, k.grantId, ["feedback", "data"]);
+    const rev = await applyRevision(k.chapters ?? [], latest.issues ?? [], chapterAnswers, refs);
     await snapshotChapters(input.caseId, k.chapters ?? [], rev.chapters, "修改迴圈");
     await getDb().update(cases).set({ chapters: rev.chapters }).where(eq(cases.id, input.caseId));
 
@@ -531,6 +557,79 @@ export const reviewRouter = createRouter({
       targetScore: k.targetScore,
       passed: out.totalScore >= k.targetScore,
     };
+  }),
+});
+
+// ============================================================================
+// 參考資料庫：得標範本／評分文件／委員意見／數據文獻
+// 只存文字（供 AI 使用），原始檔案由使用者自行留存
+// ============================================================================
+export const referenceRouter = createRouter({
+  list: publicQuery
+    .input(z.object({ kind: z.string().default(""), grantId: z.number().nullable().default(null) }))
+    .query(async ({ input }) => {
+      const all = await getDb().query.referenceDocs.findMany({ orderBy: [desc(referenceDocs.id)] });
+      const gs = await getDb().query.grantPrograms.findMany();
+      return all
+        .filter((d) =>
+          (!input.kind || d.kind === input.kind) &&
+          (input.grantId == null || d.grantId === input.grantId || d.grantId == null))
+        .map((d) => ({
+          id: d.id,
+          title: d.title,
+          kind: d.kind,
+          grantId: d.grantId,
+          grantName: d.grantId ? (gs.find((g) => g.id === d.grantId)?.name ?? "未知補助案") : null,
+          caseId: d.caseId,
+          filename: d.filename,
+          note: d.note,
+          createdAt: d.createdAt,
+          textLength: d.textContent?.length ?? 0,
+          preview: (d.textContent ?? "").slice(0, 150),
+        }));
+    }),
+
+  get: publicQuery.input(z.object({ id: z.number() })).query(async ({ input }) => {
+    return getDb().query.referenceDocs.findFirst({ where: eq(referenceDocs.id, input.id) });
+  }),
+
+  create: publicQuery
+    .input(z.object({
+      title: z.string().min(1),
+      kind: z.enum(["example", "rubric_doc", "feedback", "data"]),
+      grantId: z.number().nullable().default(null),
+      note: z.string().default(""),
+      text: z.string().default(""),
+      filename: z.string().nullable().default(null),
+      fileData: z.custom<Uint8Array>((v) => v instanceof Uint8Array).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      let text = input.text.trim();
+      if (!text && input.fileData) {
+        const name = (input.filename ?? "").toLowerCase();
+        if (name.endsWith(".docx")) {
+          text = docxToText(input.fileData);
+        } else {
+          text = Buffer.from(input.fileData).toString("utf8").trim();
+        }
+      }
+      if (!text) throw new Error("沒有可用的文字內容——請貼上文字，或上傳 .docx／.txt 檔案");
+      if (text.length > 200000) text = text.slice(0, 200000);
+      const [{ id }] = await getDb().insert(referenceDocs).values({
+        title: input.title,
+        kind: input.kind,
+        grantId: input.grantId,
+        caseId: null,
+        filename: input.filename,
+        textContent: text,
+        note: input.note.trim() || null,
+      }).$returningId();
+      return { id, textLength: text.length };
+    }),
+
+  remove: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    await getDb().delete(referenceDocs).where(eq(referenceDocs.id, input.id));
+    return { ok: true };
   }),
 });
 

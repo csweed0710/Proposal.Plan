@@ -102,6 +102,30 @@ export interface MatchResult {
 // 舊狀態鍵的相容標籤（歷史資料用，新流程請用上方的 CASE_STATUSES）
 Object.assign(CASE_STATUS_LABELS, { writing: "撰稿中", review: "審核中" });
 
+// ============================================================================
+// 參考資料庫：得標範本、評分文件、委員意見、數據文獻
+// ============================================================================
+export const REF_KINDS = [
+  { key: "example", label: "得標範本", usage: "起草時作為結構與語氣的標竿（學風格，不抄內容）" },
+  { key: "rubric_doc", label: "評分文件", usage: "官方評分表、審查基準——存放備查，也可貼到補助案「公告解析」抽出評分標準" },
+  { key: "feedback", label: "委員意見", usage: "過去案件的審查意見——下次投同一補助案，起草與修改會自動回應" },
+  { key: "data", label: "數據文獻", usage: "產業數據、統計、研究——起草時作為可引用素材" },
+] as const;
+export type RefKind = (typeof REF_KINDS)[number]["key"];
+export const REF_KIND_LABELS: Record<string, string> = Object.fromEntries(REF_KINDS.map((k) => [k.key, k.label]));
+
+export interface ReferenceDoc {
+  id: number;
+  title: string;
+  kind: RefKind;
+  grantId: number | null;  // null＝全部補助案通用
+  caseId: number | null;   // 委員意見的來源案件（可空）
+  filename: string | null;
+  textContent: string | null;
+  note: string | null;
+  createdAt: Date | string;
+}
+
 export const GRANT_CATEGORIES = [
   "創新研發",
   "地方創生",

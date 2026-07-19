@@ -154,7 +154,14 @@ export default function CaseDetail() {
     onSuccess: () => utils.cases.get.invalidate(),
   });
   const draft = trpc.cases.draftChapter.useMutation({
-    onSuccess: () => { utils.cases.get.invalidate(); },
+    onSuccess: (d) => {
+      utils.cases.get.invalidate();
+      setDraftInfo(
+        d.usedAI
+          ? `AI 已生成草稿${d.usedRefs ? `，引用 ${d.usedRefs} 份參考資料` : ""}`
+          : "已生成規則模式骨架（啟用 AI 可得全文）",
+      );
+    },
   });
   const runReview = trpc.review.run.useMutation({
     onSuccess: () => { utils.cases.get.invalidate(); utils.review.list.invalidate(); utils.cases.list.invalidate(); },
@@ -182,6 +189,8 @@ export default function CaseDetail() {
   const [feedback, setFeedback] = useState("");
   // 版本歷史對話框
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // 草稿生成結果提示
+  const [draftInfo, setDraftInfo] = useState<string | null>(null);
 
   const latest = (reviewList.data ?? [])[0];
   const history = useMemo(() => [...(reviewList.data ?? [])].sort((a, b) => a.round - b.round), [reviewList.data]);
@@ -476,7 +485,7 @@ export default function CaseDetail() {
               {chapters.map((c, i) => (
                 <button
                   key={c.key}
-                  onClick={() => setActiveChapter(c.key)}
+                  onClick={() => { setActiveChapter(c.key); setDraftInfo(null); }}
                   className={`w-full text-left p-2.5 rounded-lg border text-sm transition-colors ${
                     activeChapter === c.key ? "border-accent bg-accent/5" : "border-border hover:bg-secondary"
                   }`}
@@ -559,8 +568,13 @@ export default function CaseDetail() {
                       }
                       placeholder={current.tableType ? "表格之外的補充說明文字（如經費編列原則、指標設定理念）…" : "從右上的「生成草稿」開始，或直接撰寫／貼上內容。"}
                     />
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-xs text-muted-foreground">{current.content.trim().length} 字</span>
+                      {draftInfo && (
+                        <span className="text-xs text-emerald-600 flex items-center gap-1 truncate">
+                          <Sparkles className="w-3 h-3 shrink-0" /> {draftInfo}
+                        </span>
+                      )}
                       <Button
                         size="sm" disabled={saveChapters.isPending}
                         onClick={() => saveChapters.mutate({ id: caseId, chapters })}

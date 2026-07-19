@@ -5,6 +5,7 @@ import {
   Users,
   Target,
   FolderKanban,
+  BookOpen,
   Sparkles,
 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
@@ -15,6 +16,7 @@ const NAV = [
   { to: "/clients", label: "客戶資料庫", icon: Users },
   { to: "/match", label: "適配分析", icon: Target },
   { to: "/cases", label: "案件工作台", icon: FolderKanban },
+  { to: "/references", label: "參考資料庫", icon: BookOpen },
 ];
 
 export default function Layout() {

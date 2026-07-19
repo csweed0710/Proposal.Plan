@@ -1,5 +1,5 @@
 import { createRouter, publicQuery } from "./middleware";
-import { grantRouter, clientRouter, caseRouter, reviewRouter, metaRouter } from "./features";
+import { grantRouter, clientRouter, caseRouter, reviewRouter, referenceRouter, metaRouter } from "./features";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
@@ -7,6 +7,7 @@ export const appRouter = createRouter({
   clients: clientRouter,
   cases: caseRouter,
   review: reviewRouter,
+  references: referenceRouter,
   meta: metaRouter,
 });
 
