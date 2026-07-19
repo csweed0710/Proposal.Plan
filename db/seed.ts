@@ -4,16 +4,63 @@
 import { getDb } from "../api/queries/connection";
 import { grantPrograms, clients, cases } from "./schema";
 import { generateIntake } from "../api/engines/intake";
-import type { ChapterSpec, RubricItem } from "../contracts/types";
+import type { ChapterSpec, ChapterTable, RubricItem } from "../contracts/types";
+
+// 示範案件的結構化表格內容（對應 MOC 章節：goal=kpi、schedule=schedule、budget=budget）
+const DEMO_KPI: ChapterTable = {
+  type: "kpi",
+  kpi: {
+    rows: [
+      { id: "k1", indicator: "服務獨居長者人數", target: "150 人（目前 0 人）", basis: "服務簽到紀錄" },
+      { id: "k2", indicator: "藝術陪伴活動場次", target: "48 場（目前 0 場）", basis: "活動紀錄表＋照片" },
+      { id: "k3", indicator: "培訓陪伴志工人數", target: "30 人（目前 12 人）", basis: "培訓簽到與檢核表" },
+      { id: "k4", indicator: "長者孤獨感量表（UCLA）改善", target: "前後測平均下降 20%", basis: "期初期末量表施測" },
+    ],
+  },
+};
+
+const DEMO_SCHEDULE: ChapterTable = {
+  type: "schedule",
+  schedule: {
+    months: 12,
+    rows: [
+      { id: "s1", task: "志工招募與培訓", startMonth: 1, endMonth: 3, checkpoint: "30 名志工完成 18 小時培訓" },
+      { id: "s2", task: "個案訪視與媒合", startMonth: 2, endMonth: 4, checkpoint: "完成 150 位長者需求評估" },
+      { id: "s3", task: "藝術陪伴活動執行", startMonth: 3, endMonth: 11, checkpoint: "每月 4–5 場，累計 48 場" },
+      { id: "s4", task: "期中評估與修正", startMonth: 6, endMonth: 6, checkpoint: "期中報告＋孤獨感量表前測" },
+      { id: "s5", task: "成果展覽與結案", startMonth: 11, endMonth: 12, checkpoint: "成果展 1 場、結案報告送部" },
+    ],
+  },
+};
+
+const DEMO_BUDGET: ChapterTable = {
+  type: "budget",
+  budget: {
+    rows: [
+      { id: "b1", item: "講師鐘點費", detail: "藝術陪伴帶領講師，每場 2 小時", unit: "場", qty: 48, unitPrice: 3200, grantShare: 153600, selfShare: 0, note: "依文化部講師費標準 1,600 元/時" },
+      { id: "b2", item: "材料費", detail: "每場創作材料（畫材、輕黏土等）", unit: "場", qty: 48, unitPrice: 800, grantShare: 38400, selfShare: 0, note: "每場 25 人份估算" },
+      { id: "b3", item: "志工培訓費", detail: "培訓課程講師與場地", unit: "梯次", qty: 3, unitPrice: 12000, grantShare: 24000, selfShare: 12000, note: "每梯次 6 小時" },
+      { id: "b4", item: "交通費", detail: "偏里服務交通補貼", unit: "人次", qty: 96, unitPrice: 300, grantShare: 14400, selfShare: 14400, note: "台鐵・客運實報實銷" },
+      { id: "b5", item: "成果展覽", detail: "期末社區成果展佈展與印刷", unit: "場", qty: 1, unitPrice: 30000, grantShare: 15000, selfShare: 15000, note: "結合里民活動中心" },
+      { id: "b6", item: "行政費", detail: "專案管理與核銷行政", unit: "式", qty: 1, unitPrice: 60000, grantShare: 20000, selfShare: 40000, note: "不超過總經費 10%" },
+    ],
+  },
+};
+
+const DEMO_TABLES: Record<string, ChapterTable> = {
+  goal: DEMO_KPI,
+  schedule: DEMO_SCHEDULE,
+  budget: DEMO_BUDGET,
+};
 
 const SBIR_CHAPTERS: ChapterSpec[] = [
   { key: "summary", title: "計畫摘要", required: true, guidance: "一句話願景＋三個量化亮點，全書完成後最後寫", weight: 5 },
   { key: "company", title: "公司概況與團隊", required: true, guidance: "核心成員資歷對應分工，研發能量具體化", weight: 3 },
   { key: "background", title: "計畫緣起與問題分析", required: true, guidance: "產業痛點＋數據佐證，說明為什麼是現在", weight: 4 },
   { key: "innovation", title: "創新內容與核心技術", required: true, guidance: "與現有做法的差異、創新點、技術或服務可行性", weight: 5 },
-  { key: "method", title: "執行方法與時程", required: true, guidance: "工作項目分解、查核點、甘特圖概念", weight: 4 },
-  { key: "benefit", title: "預期效益與量化指標", required: true, guidance: "基期值與目標值並陳，連結產值與就業", weight: 4 },
-  { key: "budget", title: "經費預算", required: true, guidance: "科目對應工作項目，自籌款展現承諾（補助款≤總經費50%）", weight: 4 },
+  { key: "method", title: "執行方法與時程", required: true, guidance: "工作項目分解、查核點、甘特圖概念", weight: 4, tableType: "schedule" },
+  { key: "benefit", title: "預期效益與量化指標", required: true, guidance: "基期值與目標值並陳，連結產值與就業", weight: 4, tableType: "kpi" },
+  { key: "budget", title: "經費預算", required: true, guidance: "科目對應工作項目，自籌款展現承諾（補助款≤總經費50%）", weight: 4, tableType: "budget" },
   { key: "risk", title: "風險與應變", required: false, guidance: "真實風險＋具體應變，不寫空泛項目", weight: 2 },
 ];
 
@@ -29,12 +76,12 @@ const MOC_CHAPTERS: ChapterSpec[] = [
   { key: "summary", title: "計畫摘要", required: true, guidance: "計畫亮點與公共價值一頁看懂", weight: 5 },
   { key: "background", title: "計畫緣起", required: true, guidance: "議題脈絡與參與動機", weight: 4 },
   { key: "analysis", title: "現況分析", required: true, guidance: "場域、對象、既有資源盤點", weight: 3 },
-  { key: "goal", title: "計畫目標", required: true, guidance: "總目標＋分項目標＋量化指標", weight: 4 },
+  { key: "goal", title: "計畫目標", required: true, guidance: "總目標＋分項目標＋量化指標", weight: 4, tableType: "kpi" },
   { key: "method", title: "執行內容與方法", required: true, guidance: "工作項目、方法、創新之處", weight: 5 },
-  { key: "schedule", title: "執行進度", required: true, guidance: "期程與查核點", weight: 3 },
+  { key: "schedule", title: "執行進度", required: true, guidance: "期程與查核點", weight: 3, tableType: "schedule" },
   { key: "team", title: "組織與人力", required: true, guidance: "分工與專業背景", weight: 3 },
   { key: "track", title: "過去實績", required: true, guidance: "近三年相關成果數據", weight: 4 },
-  { key: "budget", title: "經費預算", required: true, guidance: "科目對應工作項目", weight: 4 },
+  { key: "budget", title: "經費預算", required: true, guidance: "科目對應工作項目", weight: 4, tableType: "budget" },
   { key: "benefit", title: "預期效益", required: true, guidance: "量化與質化效益、受益對象", weight: 4 },
   { key: "sustain", title: "永續與推廣", required: true, guidance: "結案後的延續與擴散", weight: 3 },
 ];
@@ -51,12 +98,12 @@ const CSR_CHAPTERS: ChapterSpec[] = [
   { key: "summary", title: "計畫摘要", required: true, guidance: "地方價值主張一句話", weight: 5 },
   { key: "dna", title: "地方現況與 DNA 分析", required: true, guidance: "在地資源、人口、產業盤點", weight: 4 },
   { key: "problem", title: "問題與機會", required: true, guidance: "地方痛點與切入機會", weight: 4 },
-  { key: "goal", title: "計畫目標", required: true, guidance: "量化目標與查核指標", weight: 4 },
+  { key: "goal", title: "計畫目標", required: true, guidance: "量化目標與查核指標", weight: 4, tableType: "kpi" },
   { key: "model", title: "事業構想與商業模式", required: true, guidance: "收入從哪來、如何自償", weight: 5 },
   { key: "method", title: "執行策略", required: true, guidance: "工作項目與方法", weight: 4 },
-  { key: "schedule", title: "時程與查核", required: true, guidance: "里程碑與查核點", weight: 3 },
+  { key: "schedule", title: "時程與查核", required: true, guidance: "里程碑與查核點", weight: 3, tableType: "schedule" },
   { key: "team", title: "團隊與合作夥伴", required: true, guidance: "在地連結與外部夥伴", weight: 3 },
-  { key: "budget", title: "經費預算", required: true, guidance: "科目對應與自籌", weight: 4 },
+  { key: "budget", title: "經費預算", required: true, guidance: "科目對應與自籌", weight: 4, tableType: "budget" },
   { key: "sustain", title: "預期效益與永續", required: true, guidance: "就業、人口回流、模式複製", weight: 4 },
 ];
 
@@ -74,9 +121,9 @@ const ART_CHAPTERS: ChapterSpec[] = [
   { key: "content", title: "演出內容與藝術理念", required: true, guidance: "作品概念、形式、曲目或橋段", weight: 5 },
   { key: "method", title: "執行方式與場地", required: true, guidance: "場次、場地、技術需求", weight: 4 },
   { key: "marketing", title: "行銷與觀眾開發", required: true, guidance: "目標觀眾與推廣管道", weight: 3 },
-  { key: "schedule", title: "時程", required: true, guidance: "排練與演出期程", weight: 3 },
-  { key: "budget", title: "經費預算", required: true, guidance: "科目對應場次", weight: 4 },
-  { key: "benefit", title: "預期效益", required: true, guidance: "觀眾人次與藝文影響", weight: 3 },
+  { key: "schedule", title: "時程", required: true, guidance: "排練與演出期程", weight: 3, tableType: "schedule" },
+  { key: "budget", title: "經費預算", required: true, guidance: "科目對應場次", weight: 4, tableType: "budget" },
+  { key: "benefit", title: "預期效益", required: true, guidance: "觀眾人次與藝文影響", weight: 3, tableType: "kpi" },
 ];
 
 const ART_RUBRIC: RubricItem[] = [
@@ -277,13 +324,16 @@ async function seed() {
         content = "本計畫擬為台南 3 個里的獨居長者提供藝術陪伴服務。";
         status = "draft";
       }
-      return { ...s, content, status };
+      // 表格章節：附上示範表格，開箱就能體驗結構化編輯與匯出
+      const table = DEMO_TABLES[s.key];
+      if (table) status = "draft";
+      return { ...s, content, status, ...(table ? { table } : {}) };
     });
     await db.insert(cases).values({
       clientId: clientA,
       grantId: moc.id,
       title: "社區長者藝術陪伴計畫（示範案件）",
-      status: "writing",
+      status: "draft",
       targetScore: 85,
       intakeQA,
       chapters,

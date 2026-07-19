@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { GRANT_CATEGORIES, ORG_TYPES, TEMPLATE_FIELDS, type ChapterSpec, type RubricItem } from "@contracts/types";
+import { GRANT_CATEGORIES, ORG_TYPES, TEMPLATE_FIELDS, TABLE_TYPE_LABELS, type ChapterSpec, type ChapterTableType, type RubricItem } from "@contracts/types";
 
 const emptyForm = {
   name: "", agency: "", category: "其他", description: "",
@@ -262,6 +262,35 @@ export default function GrantEdit() {
                 value={c.guidance}
                 onChange={(e) => setChapter(i, { guidance: e.target.value })}
               />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select
+                  value={c.tableType ?? "none"}
+                  onValueChange={(v) => setChapter(i, { tableType: v === "none" ? undefined : (v as ChapterTableType) })}
+                >
+                  <SelectTrigger className="w-40 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">純文字章節</SelectItem>
+                    {(Object.keys(TABLE_TYPE_LABELS) as ChapterTableType[]).map((t) => (
+                      <SelectItem key={t} value={t}>{TABLE_TYPE_LABELS[t]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    className="w-28 h-8 text-xs" type="number" min={50} placeholder="字數上限"
+                    value={c.wordLimit ?? ""}
+                    onChange={(e) => setChapter(i, { wordLimit: e.target.value ? Number(e.target.value) : undefined })}
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">字數上限（選填）</span>
+                </div>
+                {c.tableType && (
+                  <span className="text-xs text-primary">
+                    此章在寫作台會出現結構化表格，匯出 Word 時自動變成真表格
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </CardContent>

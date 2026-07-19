@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import {
   Sparkles, Save, Play, Wrench, Repeat2, CheckCircle2,
-  AlertTriangle, Info, CircleCheck, CircleDashed, FileDown,
+  AlertTriangle, Info, CircleCheck, CircleDashed, FileDown, Send, History,
 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { downloadDocx, PageHeader, ScoreBadge } from "@/components/bits";
@@ -10,12 +10,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import type { CaseChapter, IntakeQuestion, ReviewDimension, ReviewIssue } from "@contracts/types";
+import type { CaseChapter, ChapterTable, IntakeQuestion, ReviewDimension, ReviewIssue } from "@contracts/types";
+import { emptyChapterTable, TABLE_TYPE_LABELS, CASE_STATUSES } from "@contracts/types";
+import { BudgetEditor, ScheduleEditor, KpiEditor } from "@/components/TableEditors";
 
 const SEV = {
   high: { label: "高", cls: "bg-red-100 text-red-700" },
@@ -38,6 +42,76 @@ function DimBar({ d }: { d: ReviewDimension }) {
       </div>
       <div className="text-xs text-muted-foreground mt-1">{d.summary}</div>
     </div>
+  );
+}
+
+// 章節版本歷史對話框：列出快照、預覽內容、一鍵還原
+function VersionDialog({ caseId, chapterKey, chapterTitle, open, onOpenChange }: {
+  caseId: number;
+  chapterKey: string;
+  chapterTitle: string;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  const utils = trpc.useUtils();
+  const versions = trpc.cases.versions.useQuery(
+    { id: caseId, chapterKey },
+    { enabled: open },
+  );
+  const restore = trpc.cases.restoreVersion.useMutation({
+    onSuccess: () => {
+      utils.cases.get.invalidate();
+      utils.cases.versions.invalidate();
+      onOpenChange(false);
+    },
+  });
+  const SOURCE_CLS: Record<string, string> = {
+    "手動編輯": "bg-gray-100 text-gray-600",
+    "AI 起草": "bg-violet-100 text-violet-700",
+    "修改迴圈": "bg-blue-100 text-blue-700",
+    "還原前快照": "bg-amber-100 text-amber-700",
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>「{chapterTitle}」版本歷史</DialogTitle>
+          <DialogDescription>
+            每次儲存、AI 起草、修改迴圈之前，系統都會自動留下快照。看走眼了隨時可以還原。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {(versions.data ?? []).length === 0 && (
+            <div className="text-sm text-muted-foreground py-6 text-center">
+              這個章節還沒有歷史版本——第一次更動內容後就會開始記錄。
+            </div>
+          )}
+          {(versions.data ?? []).map((v) => (
+            <div key={v.id} className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <Badge className={`${SOURCE_CLS[v.source] ?? "bg-gray-100 text-gray-600"} hover:bg-current/10`}>{v.source}</Badge>
+                  <span className="text-muted-foreground">
+                    {new Date(v.createdAt).toLocaleString("zh-TW", { hour12: false })}
+                  </span>
+                  {v.tableJson && <Badge variant="outline" className="text-xs">含表格</Badge>}
+                </div>
+                <Button
+                  size="sm" variant="outline"
+                  disabled={restore.isPending}
+                  onClick={() => restore.mutate({ id: caseId, versionId: v.id })}
+                >
+                  還原成這版
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4 bg-secondary/50 rounded p-2">
+                {v.content?.trim() ? v.content : "（無文字內容）"}
+              </div>
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -89,6 +163,25 @@ export default function CaseDetail() {
   const setTargetScore = trpc.cases.setTargetScore.useMutation({
     onSuccess: () => utils.cases.get.invalidate(),
   });
+  const setStatus = trpc.cases.setStatus.useMutation({
+    onSuccess: () => { utils.cases.get.invalidate(); utils.cases.list.invalidate(); },
+  });
+  const setResult = trpc.cases.setResult.useMutation({
+    onSuccess: () => {
+      setResultOpen(false);
+      utils.cases.get.invalidate();
+      utils.cases.list.invalidate();
+    },
+  });
+
+  // 送件／結果登錄對話框狀態
+  const [resultOpen, setResultOpen] = useState(false);
+  const [resultStatus, setResultStatus] = useState<"submitted" | "won" | "lost">("submitted");
+  const [submittedAt, setSubmittedAt] = useState("");
+  const [resultAmount, setResultAmount] = useState("");
+  const [feedback, setFeedback] = useState("");
+  // 版本歷史對話框
+  const [versionsOpen, setVersionsOpen] = useState(false);
 
   const latest = (reviewList.data ?? [])[0];
   const history = useMemo(() => [...(reviewList.data ?? [])].sort((a, b) => a.round - b.round), [reviewList.data]);
@@ -146,6 +239,31 @@ export default function CaseDetail() {
     generic: "通用排版（此補助案尚未上傳範本）",
   } as const;
 
+  // 舊資料狀態相容：早期版本的 writing/review 對應到新 pipeline
+  const STATUS_ALIAS: Record<string, string> = { writing: "draft", review: "reviewing" };
+  const statusKey = CASE_STATUSES.some((s) => s.key === k.data.status)
+    ? k.data.status
+    : (STATUS_ALIAS[k.data.status] ?? "intake");
+
+  // 切換狀態：送件／得標／未通過需要額外資訊，開對話框；其餘直接改
+  const onStatusChange = (v: string) => {
+    if (v === "submitted" || v === "won" || v === "lost") {
+      setResultStatus(v);
+      setSubmittedAt(
+        k.data.submittedAt
+          ? new Date(k.data.submittedAt).toISOString().slice(0, 10)
+          : new Date().toISOString().slice(0, 10),
+      );
+      setResultAmount(k.data.resultAmount != null ? String(k.data.resultAmount) : "");
+      setFeedback(k.data.reviewFeedback ?? "");
+      setResultOpen(true);
+    } else {
+      setStatus.mutate({ id: caseId, status: v as never });
+    }
+  };
+
+  const RESULT_STATUS_LABEL = { submitted: "已送件", won: "得標", lost: "未通過" } as const;
+
   return (
     <div>
       <PageHeader
@@ -161,6 +279,111 @@ export default function CaseDetail() {
           </div>
         }
       />
+
+      {/* 案件進度列：pipeline 狀態＋送件結果 */}
+      <Card className="mb-5">
+        <CardContent className="py-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Send className="w-3.5 h-3.5" /> 案件狀態
+            </span>
+            <Select value={statusKey} onValueChange={onStatusChange}>
+              <SelectTrigger className="w-32 h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CASE_STATUSES.map((s) => (
+                  <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {k.data.submittedAt && (
+              <span className="text-xs text-muted-foreground">
+                送件日 {new Date(k.data.submittedAt).toLocaleDateString("zh-TW")}
+              </span>
+            )}
+            {k.data.resultAmount != null && (
+              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                核定 NT$ {k.data.resultAmount.toLocaleString()}
+              </Badge>
+            )}
+            {(statusKey === "submitted" || statusKey === "won" || statusKey === "lost") && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onStatusChange(statusKey)}>
+                更新送件資料
+              </Button>
+            )}
+          </div>
+          {k.data.reviewFeedback && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5">
+              <div className="text-xs font-medium text-amber-700 mb-1">委員審查意見（下次投同案的秘密武器）</div>
+              <div className="text-xs text-amber-800/90 whitespace-pre-wrap">{k.data.reviewFeedback}</div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 送件／結果登錄對話框 */}
+      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>登錄「{RESULT_STATUS_LABEL[resultStatus]}」</DialogTitle>
+            <DialogDescription>
+              這些紀錄會出現在儀表板，幫你追蹤每個案件的成果與投遞歷史。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="submittedAt">送件日期</Label>
+              <Input id="submittedAt" type="date" value={submittedAt} onChange={(e) => setSubmittedAt(e.target.value)} />
+            </div>
+            {resultStatus === "won" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="resultAmount">核定金額（元）</Label>
+                <Input
+                  id="resultAmount" type="number" min={0} placeholder="例如 1000000"
+                  value={resultAmount} onChange={(e) => setResultAmount(e.target.value)}
+                />
+              </div>
+            )}
+            {resultStatus !== "submitted" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="feedback">委員審查意見</Label>
+                <Textarea
+                  id="feedback" rows={4}
+                  placeholder="把收到的審查意見貼在這裡——下次投同一個補助案時，這就是最珍貴的情報。"
+                  value={feedback} onChange={(e) => setFeedback(e.target.value)}
+                />
+              </div>
+            )}
+            <Button
+              className="w-full"
+              disabled={setResult.isPending}
+              onClick={() =>
+                setResult.mutate({
+                  id: caseId,
+                  status: resultStatus,
+                  submittedAt: submittedAt || null,
+                  resultAmount: resultStatus === "won" && resultAmount ? Number(resultAmount) : null,
+                  reviewFeedback: feedback,
+                })
+              }
+            >
+              {setResult.isPending ? "儲存中…" : "確認登錄"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 章節版本歷史 */}
+      {current && (
+        <VersionDialog
+          caseId={caseId}
+          chapterKey={current.key}
+          chapterTitle={current.title}
+          open={versionsOpen}
+          onOpenChange={setVersionsOpen}
+        />
+      )}
 
       {/* 匯出結果說明 */}
       <Dialog open={!!exportInfo} onOpenChange={(o) => !o && setExportInfo(null)}>
@@ -268,6 +491,7 @@ export default function CaseDetail() {
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5 pl-5.5 flex gap-2">
                     {c.required && <span>必要</span>}
+                    {c.tableType && <span className="text-primary font-medium">{TABLE_TYPE_LABELS[c.tableType]}</span>}
                     <span>{c.content.trim() ? `${c.content.trim().length} 字` : "未開始"}</span>
                   </div>
                 </button>
@@ -282,23 +506,58 @@ export default function CaseDetail() {
                       <CardTitle className="text-base">{current.title}</CardTitle>
                       {current.guidance && <div className="text-xs text-muted-foreground mt-1">寫作重點：{current.guidance}</div>}
                     </div>
-                    <Button
-                      variant="outline" size="sm"
-                      disabled={draft.isPending}
-                      onClick={() => draft.mutate({ id: caseId, chapterKey: current.key })}
-                    >
-                      <Sparkles className="w-4 h-4 mr-1" />
-                      {draft.isPending ? "生成中…" : current.content.trim() ? "重新生成草稿" : "生成草稿"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setVersionsOpen(true)}>
+                        <History className="w-4 h-4 mr-1" /> 歷史
+                      </Button>
+                      <Button
+                        variant="outline" size="sm"
+                        disabled={draft.isPending}
+                        onClick={() => draft.mutate({ id: caseId, chapterKey: current.key })}
+                      >
+                        <Sparkles className="w-4 h-4 mr-1" />
+                        {draft.isPending ? "生成中…" : current.content.trim() ? "重新生成草稿" : "生成草稿"}
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {/* 結構化表格（預算/進度/KPI 章節） */}
+                    {current.tableType && (
+                      <div className="rounded-lg border bg-card p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium">{TABLE_TYPE_LABELS[current.tableType]}</div>
+                          {!current.table && (
+                            <Button size="sm" variant="outline"
+                              onClick={() =>
+                                setChapters((cs) => cs.map((x) =>
+                                  x.key === current.key ? { ...x, table: emptyChapterTable(current.tableType!), status: "draft" } : x))
+                              }>
+                              建立表格
+                            </Button>
+                          )}
+                        </div>
+                        {current.table?.type === "budget" && (
+                          <BudgetEditor value={current.table.budget}
+                            onChange={(b) => setChapters((cs) => cs.map((x) => (x.key === current.key ? { ...x, table: { type: "budget", budget: b } as ChapterTable, status: "draft" } : x)))} />
+                        )}
+                        {current.table?.type === "schedule" && (
+                          <ScheduleEditor value={current.table.schedule}
+                            onChange={(s) => setChapters((cs) => cs.map((x) => (x.key === current.key ? { ...x, table: { type: "schedule", schedule: s } as ChapterTable, status: "draft" } : x)))} />
+                        )}
+                        {current.table?.type === "kpi" && (
+                          <KpiEditor value={current.table.kpi}
+                            onChange={(k) => setChapters((cs) => cs.map((x) => (x.key === current.key ? { ...x, table: { type: "kpi", kpi: k } as ChapterTable, status: "draft" } : x)))} />
+                        )}
+                      </div>
+                    )}
+
                     <Textarea
-                      rows={16}
+                      rows={current.tableType ? 9 : 16}
                       value={current.content}
                       onChange={(e) =>
                         setChapters((cs) => cs.map((x) => (x.key === current.key ? { ...x, content: e.target.value, status: "draft" } : x)))
                       }
-                      placeholder="從右上的「生成草稿」開始，或直接撰寫／貼上內容。"
+                      placeholder={current.tableType ? "表格之外的補充說明文字（如經費編列原則、指標設定理念）…" : "從右上的「生成草稿」開始，或直接撰寫／貼上內容。"}
                     />
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">{current.content.trim().length} 字</span>

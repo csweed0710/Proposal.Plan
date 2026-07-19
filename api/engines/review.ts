@@ -6,6 +6,12 @@ import type {
   ReviewIssue,
   RubricItem,
 } from "../../contracts/types";
+import {
+  BANNED_BUDGET_KEYWORDS,
+  budgetExpected,
+  budgetRowTotal,
+  budgetTotals,
+} from "../../contracts/tables";
 
 const VAGUE_PHRASES = [
   "浪潮", "賦能", "打造生態", "生態圈", "積極推動", "落實執行",
@@ -188,9 +194,150 @@ function dimConsistency(chapters: CaseChapter[]): DimResult {
       }
     }
   }
-  const score = clamp(100 - mismatches * 25);
+  // 官方字數上限
+  for (const ch of chapters) {
+    if (ch.wordLimit && ch.content.length > ch.wordLimit) {
+      issues.push({
+        severity: "mid",
+        dimension: "consistency",
+        chapterKey: ch.key,
+        location: `「${ch.title}」`,
+        problem: `內容 ${ch.content.length.toLocaleString()} 字，超過官方上限 ${ch.wordLimit.toLocaleString()} 字`,
+        suggestion: "精簡至上限以內；超過字數／頁數限制會被扣分或退件",
+      });
+    }
+  }
+  const score = clamp(100 - mismatches * 25 - issues.filter((i) => i.dimension === "consistency" && !i.problem.includes("金額不一致")).length * 8);
   return {
     dim: { key: "consistency", label: "一致性檢查", score, weight: 0.15, summary: mismatches === 0 ? "金額數字前後一致" : `發現 ${mismatches} 處金額不一致` },
+    issues,
+  };
+}
+
+// ---- 面向六：結構化表格檢核（預算/進度/KPI） --------------------------------
+// 委員 80% 先看這三張表；算錯、比例不對、禁列項目都是常見退件原因。
+function dimTables(chapters: CaseChapter[]): DimResult {
+  const issues: DimResult["issues"] = [];
+  let hasTable = false;
+
+  for (const ch of chapters) {
+    if (!ch.table) continue;
+    hasTable = true;
+    const loc = `「${ch.title}」`;
+
+    if (ch.table.type === "budget") {
+      const t = ch.table.budget;
+      const totals = budgetTotals(t);
+      if (t.rows.length === 0 || totals.total === 0) {
+        issues.push({ severity: "high", dimension: "tables", chapterKey: ch.key, location: loc,
+          problem: "預算表是空的或總額為 0",
+          suggestion: "逐列填寫科目、數量、單價與補助款/自籌款拆分；預算表空白等同未附預算，直接退件" });
+      }
+      t.rows.forEach((r, i) => {
+        const rowName = r.item || `第 ${i + 1} 列`;
+        if (!r.item.trim()) {
+          issues.push({ severity: "mid", dimension: "tables", chapterKey: ch.key, location: `${loc}第 ${i + 1} 列`,
+            problem: "科目名稱空白", suggestion: "填寫科目名稱（如人事費、材料費、差旅費），或刪除此列" });
+        }
+        const expected = budgetExpected(r);
+        const actual = budgetRowTotal(r);
+        if (expected > 0 && Math.abs(expected - actual) > 1) {
+          issues.push({ severity: "high", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: `算術不符：${r.qty} × ${r.unitPrice.toLocaleString()} = ${expected.toLocaleString()}，但拆分合計 ${actual.toLocaleString()}`,
+            suggestion: "修正數量×單價與補助款+自籌款的金額，兩者必須相等——金額算錯是退件主因之一" });
+        }
+        const text = `${r.item}${r.detail}`;
+        for (const kw of BANNED_BUDGET_KEYWORDS) {
+          if (text.includes(kw)) {
+            issues.push({ severity: "mid", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+              problem: `出現敏感科目「${kw}」——多數補助案列為不得補助項目`,
+              suggestion: "確認本案經費編列規定；若屬禁列項目請移除或改列自籌並說明必要性" });
+          }
+        }
+        if (r.unitPrice > 0 && !r.note.trim()) {
+          issues.push({ severity: "low", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: "單價未附依據", suggestion: "在備註寫明單價依據（行情、過往契約、薪資標準），委員會質疑過高單價" });
+        }
+      });
+      if (totals.total > 0) {
+        const selfRatio = totals.self / totals.total;
+        if (selfRatio < 0.5) {
+          issues.push({ severity: "low", dimension: "tables", chapterKey: ch.key, location: loc,
+            problem: `自籌款比例僅 ${(selfRatio * 100).toFixed(0)}%`,
+            suggestion: "許多補助案要求自籌款 ≥ 50%，請核對本案規定；不足時調整補助款/自籌款拆分" });
+        }
+        // 內文金額 vs 表格總額 交叉檢查
+        const m = ch.content.match(/總(?:經費|預算|計)?[^\d]{0,8}([\d,]+(?:\.\d+)?)\s*(萬元|元)/);
+        if (m) {
+          const inText = Number(m[1].replace(/,/g, "")) * (m[2] === "萬元" ? 10000 : 1);
+          if (Math.abs(inText - totals.total) > 1) {
+            issues.push({ severity: "high", dimension: "tables", chapterKey: ch.key, location: loc,
+              problem: `內文寫 ${m[1]}${m[2]}，但預算表加總為 ${totals.total.toLocaleString()} 元，前後不一致`,
+              suggestion: "統一內文與預算表的總金額；送件前所有章節的金額必須完全相同" });
+          }
+        }
+      }
+    }
+
+    if (ch.table.type === "schedule") {
+      const t = ch.table.schedule;
+      if (t.rows.length === 0) {
+        issues.push({ severity: "high", dimension: "tables", chapterKey: ch.key, location: loc,
+          problem: "進度表沒有任何工作項目", suggestion: "至少列出 3–6 個工作項目，含起訖月與查核點" });
+      }
+      t.rows.forEach((r, i) => {
+        const rowName = r.task || `第 ${i + 1} 列`;
+        if (!r.task.trim()) {
+          issues.push({ severity: "mid", dimension: "tables", chapterKey: ch.key, location: `${loc}第 ${i + 1} 列`,
+            problem: "工作項目空白", suggestion: "填寫工作項目名稱，或刪除此列" });
+        }
+        if (r.startMonth > r.endMonth) {
+          issues.push({ severity: "mid", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: `開始月（${r.startMonth}）晚於結束月（${r.endMonth}）`, suggestion: "修正起訖月份" });
+        }
+        if (r.endMonth > t.months) {
+          issues.push({ severity: "mid", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: `結束月（${r.endMonth}）超過計畫總月數（${t.months}）`, suggestion: "修正月份或調整計畫總月數" });
+        }
+        if (r.task.trim() && !r.checkpoint.trim()) {
+          issues.push({ severity: "low", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: "缺少查核點", suggestion: "每個工作項目都應有可驗收的查核點（如「完成期中報告」「產出 20 份問卷」）" });
+        }
+      });
+    }
+
+    if (ch.table.type === "kpi") {
+      const t = ch.table.kpi;
+      if (t.rows.length === 0) {
+        issues.push({ severity: "high", dimension: "tables", chapterKey: ch.key, location: loc,
+          problem: "效益指標表是空的", suggestion: "列出 3–5 個量化 KPI（人次、產值、場次…），附目標值與計算基準" });
+      }
+      t.rows.forEach((r, i) => {
+        const rowName = r.indicator || `第 ${i + 1} 列`;
+        if (!r.indicator.trim()) {
+          issues.push({ severity: "mid", dimension: "tables", chapterKey: ch.key, location: `${loc}第 ${i + 1} 列`,
+            problem: "指標名稱空白", suggestion: "填寫指標名稱（如服務人次、滿意度），或刪除此列" });
+        }
+        if (r.indicator.trim() && !/\d/.test(r.target)) {
+          issues.push({ severity: "high", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: "目標值沒有數字——KPI 必須量化",
+            suggestion: "把目標改成可衡量的數字（如 1,200 人次/年、滿意度 85%）；「提升」「強化」不算指標" });
+        }
+        if (r.indicator.trim() && !r.basis.trim()) {
+          issues.push({ severity: "low", dimension: "tables", chapterKey: ch.key, location: `${loc}「${rowName}」`,
+            problem: "缺少計算基準", suggestion: "寫明數字怎麼算出來的（如每週 2 場 × 15 人 × 40 週），委員必問" });
+        }
+      });
+    }
+  }
+
+  const deduct = issues.reduce((s, i) => s + ({ high: 25, mid: 10, low: 4 }[i.severity]), 0);
+  const score = hasTable ? clamp(100 - deduct) : 100;
+  return {
+    dim: {
+      key: "tables", label: "表格檢核（預算/進度/KPI）", score, weight: 0.15,
+      summary: hasTable ? `表格問題 ${issues.length} 項` : "本案章節未宣告結構化表格",
+    },
     issues,
   };
 }
@@ -209,9 +356,11 @@ export function runReview(chapters: CaseChapter[], rubric: RubricItem[], round: 
     dimStructure(chapters),
     dimSpecificity(chapters),
     dimConsistency(chapters),
+    dimTables(chapters),
   ];
   const dimensions = results.map((r) => r.dim);
-  const totalScore = clamp(dimensions.reduce((s, d) => s + d.score * d.weight, 0));
+  const totalWeight = dimensions.reduce((s, d) => s + d.weight, 0);
+  const totalScore = clamp(dimensions.reduce((s, d) => s + d.score * d.weight, 0) / totalWeight);
   const issues: ReviewIssue[] = results
     .flatMap((r) => r.issues)
     .sort((a, b) => ({ high: 0, mid: 1, low: 2 })[a.severity] - { high: 0, mid: 1, low: 2 }[b.severity])

@@ -1,9 +1,9 @@
 // 功能路由：補助案、客戶、適配、案件、問卷、寫作、審核、修改迴圈
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { grantPrograms, clients, cases, reviews } from "@db/schema";
+import { grantPrograms, clients, cases, reviews, chapterVersions } from "@db/schema";
 import { matchAll } from "./engines/matching";
 import { generateIntake } from "./engines/intake";
 import { draftChapter } from "./engines/writer";
@@ -19,6 +19,8 @@ const chapterSpec = z.object({
   required: z.boolean(),
   guidance: z.string(),
   weight: z.number().optional(),
+  tableType: z.enum(["budget", "schedule", "kpi"]).optional(),
+  wordLimit: z.number().optional(),
 });
 
 const rubricItem = z.object({
@@ -83,6 +85,27 @@ async function mustGetCase(caseId: number) {
   const row = await getDb().query.cases.findFirst({ where: eq(cases.id, caseId) });
   if (!row) throw new Error("案件不存在");
   return row;
+}
+
+// ---- 版本快照：覆寫章節「前」把舊狀態存進 chapter_versions，之後可回看、可還原 ----
+async function snapshotChapters(caseId: number, before: CaseChapter[], after: CaseChapter[], source: string) {
+  const rows = after.flatMap((next) => {
+    const prev = before.find((c) => c.key === next.key);
+    if (!prev) return [];
+    const contentChanged = (prev.content ?? "") !== (next.content ?? "");
+    const tableChanged = JSON.stringify(prev.table ?? null) !== JSON.stringify(next.table ?? null);
+    if (!contentChanged && !tableChanged) return [];
+    // 舊狀態全空就不留版本，避免一堆空快照洗版
+    if (!prev.content && !prev.table) return [];
+    return [{
+      caseId,
+      chapterKey: prev.key,
+      content: prev.content ?? "",
+      tableJson: prev.table ?? null,
+      source,
+    }];
+  });
+  if (rows.length) await getDb().insert(chapterVersions).values(rows);
 }
 
 // ---- 公告解析：貼上公告文字 → 結構化草稿（AI 優先，規則兜底） ------------
@@ -315,14 +338,17 @@ export const caseRouter = createRouter({
   saveIntake: publicQuery
     .input(z.object({ id: z.number(), intakeQA: z.array(z.any()) }))
     .mutation(async ({ input }) => {
-      await getDb().update(cases).set({ intakeQA: input.intakeQA as never, status: "writing" }).where(eq(cases.id, input.id));
+      await getDb().update(cases).set({ intakeQA: input.intakeQA as never, status: "draft" }).where(eq(cases.id, input.id));
       return { ok: true };
     }),
 
   saveChapters: publicQuery
     .input(z.object({ id: z.number(), chapters: z.array(z.any()) }))
     .mutation(async ({ input }) => {
-      await getDb().update(cases).set({ chapters: input.chapters as never }).where(eq(cases.id, input.id));
+      const k = await mustGetCase(input.id);
+      const next = input.chapters as CaseChapter[];
+      await snapshotChapters(input.id, k.chapters ?? [], next, "手動編輯");
+      await getDb().update(cases).set({ chapters: next as never }).where(eq(cases.id, input.id));
       return { ok: true };
     }),
 
@@ -346,8 +372,70 @@ export const caseRouter = createRouter({
       const chapters = (k.chapters ?? []).map((c) =>
         c.key === input.chapterKey ? { ...c, content, status: "draft" as const } : c,
       );
-      await getDb().update(cases).set({ chapters, status: "writing" }).where(eq(cases.id, input.id));
+      await snapshotChapters(input.id, k.chapters ?? [], chapters, "AI 起草");
+      await getDb().update(cases).set({ chapters, status: "draft" }).where(eq(cases.id, input.id));
       return { content, usedAI };
+    }),
+
+  // ---- 案件 pipeline：狀態流轉 ----
+  setStatus: publicQuery
+    .input(z.object({
+      id: z.number(),
+      status: z.enum(["intake", "draft", "reviewing", "done", "submitted", "won", "lost"]),
+    }))
+    .mutation(async ({ input }) => {
+      await getDb().update(cases).set({ status: input.status }).where(eq(cases.id, input.id));
+      return { ok: true };
+    }),
+
+  // ---- 送件／結果登錄：送件日、核定金額、委員意見（未中標的意見是下次的秘密武器）----
+  setResult: publicQuery
+    .input(z.object({
+      id: z.number(),
+      status: z.enum(["submitted", "won", "lost"]),
+      submittedAt: z.string().nullable().default(null), // YYYY-MM-DD
+      resultAmount: z.number().nullable().default(null),
+      reviewFeedback: z.string().default(""),
+    }))
+    .mutation(async ({ input }) => {
+      await getDb().update(cases).set({
+        status: input.status,
+        submittedAt: input.submittedAt ? new Date(input.submittedAt) : null,
+        resultAmount: input.resultAmount,
+        reviewFeedback: input.reviewFeedback.trim() || null,
+      }).where(eq(cases.id, input.id));
+      return { ok: true };
+    }),
+
+  // ---- 章節版本歷史：列表（可依章節篩選）----
+  versions: publicQuery
+    .input(z.object({ id: z.number(), chapterKey: z.string().optional() }))
+    .query(async ({ input }) => {
+      const cond = input.chapterKey
+        ? and(eq(chapterVersions.caseId, input.id), eq(chapterVersions.chapterKey, input.chapterKey))
+        : eq(chapterVersions.caseId, input.id);
+      return getDb().query.chapterVersions.findMany({
+        where: cond,
+        orderBy: [desc(chapterVersions.id)],
+        limit: 100,
+      });
+    }),
+
+  // ---- 還原版本：把某章節回復到指定快照（還原前也會再快照一次，還原本身可反悔）----
+  restoreVersion: publicQuery
+    .input(z.object({ id: z.number(), versionId: z.number() }))
+    .mutation(async ({ input }) => {
+      const v = await getDb().query.chapterVersions.findFirst({ where: eq(chapterVersions.id, input.versionId) });
+      if (!v || v.caseId !== input.id) throw new Error("版本不存在");
+      const k = await mustGetCase(input.id);
+      const chapters = (k.chapters ?? []).map((c) =>
+        c.key === v.chapterKey
+          ? { ...c, content: v.content ?? "", table: v.tableJson ?? c.table, status: "draft" as const }
+          : c,
+      );
+      await snapshotChapters(input.id, k.chapters ?? [], chapters, "還原前快照");
+      await getDb().update(cases).set({ chapters: chapters as never }).where(eq(cases.id, input.id));
+      return { ok: true };
     }),
 
   // ---- 匯出成真正的 .docx 檔案（官方範本填寫 / 標題自動對應 / 通用排版）----
@@ -396,7 +484,7 @@ export const reviewRouter = createRouter({
     await getDb().update(cases).set({
       currentScore: out.totalScore,
       reviewRound: round,
-      status: out.totalScore >= k.targetScore ? "done" : "review",
+      status: out.totalScore >= k.targetScore ? "done" : "reviewing",
     }).where(eq(cases.id, input.caseId));
     return { ...out, round, targetScore: k.targetScore, passed: out.totalScore >= k.targetScore };
   }),
@@ -417,6 +505,7 @@ export const reviewRouter = createRouter({
       }
     }
     const rev = await applyRevision(k.chapters ?? [], latest.issues ?? [], chapterAnswers);
+    await snapshotChapters(input.caseId, k.chapters ?? [], rev.chapters, "修改迴圈");
     await getDb().update(cases).set({ chapters: rev.chapters }).where(eq(cases.id, input.caseId));
 
     const round = k.reviewRound + 1;
@@ -432,7 +521,7 @@ export const reviewRouter = createRouter({
     await getDb().update(cases).set({
       currentScore: out.totalScore,
       reviewRound: round,
-      status: out.totalScore >= k.targetScore ? "done" : "review",
+      status: out.totalScore >= k.targetScore ? "done" : "reviewing",
     }).where(eq(cases.id, input.caseId));
     return {
       changeLog: rev.changeLog,

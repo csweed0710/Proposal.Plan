@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TABLE_TYPE_LABELS } from "@contracts/types";
 
 export default function GrantDetail() {
   const { id } = useParams();
@@ -95,6 +96,8 @@ export default function GrantDetail() {
                   <span className="text-sm font-medium">{c.title}</span>
                   {c.required && <Badge variant="outline" className="text-xs">必要</Badge>}
                   {c.weight != null && <span className="text-xs text-muted-foreground">權重 {c.weight}</span>}
+                  {c.tableType && <Badge className="bg-primary/10 text-primary hover:bg-primary/10 text-xs">{TABLE_TYPE_LABELS[c.tableType]}</Badge>}
+                  {c.wordLimit != null && <span className="text-xs text-muted-foreground">上限 {c.wordLimit} 字</span>}
                 </div>
                 {c.guidance && <div className="text-xs text-muted-foreground mt-0.5">{c.guidance}</div>}
               </div>

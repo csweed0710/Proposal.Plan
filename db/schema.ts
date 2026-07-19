@@ -19,6 +19,7 @@ import type {
   ReviewDimension,
   ReviewIssue,
 } from "../contracts/types";
+import type { ChapterTable } from "../contracts/tables";
 
 // ============================================================================
 // 補助案：官方章節格式與評分標準以 JSON 存放 — 逐案不同、隨時可改，不寫死
@@ -95,8 +96,25 @@ export const cases = mysqlTable("cases", {
   intakeQA: json("intake_qa").$type<IntakeQuestion[]>().notNull(),
   chapters: json("chapters").$type<CaseChapter[]>().notNull(),
   rubricSnapshot: json("rubric_snapshot").$type<RubricItem[]>().notNull(),
+  // ---- 送件追蹤（接案實戰）----
+  submittedAt: timestamp("submitted_at"),       // 送件日期
+  resultAmount: int("result_amount"),           // 得標／核定金額（未通過則留空）
+  reviewFeedback: text("review_feedback"),      // 委員審查意見（下次投同案的秘密武器）
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+});
+
+// ============================================================================
+// 章節版本歷史：每次儲存/AI 起草/修改迴圈前快照，可回看可還原
+// ============================================================================
+export const chapterVersions = mysqlTable("chapter_versions", {
+  id: serial("id").primaryKey(),
+  caseId: bigint("case_id", { mode: "number", unsigned: true }).notNull(),
+  chapterKey: varchar("chapter_key", { length: 64 }).notNull(),
+  content: text("content"),
+  tableJson: json("table_json").$type<ChapterTable>(),
+  source: varchar("source", { length: 32 }).notNull().default("手動編輯"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // ============================================================================
@@ -121,3 +139,4 @@ export type Case = typeof cases.$inferSelect;
 export type InsertCase = typeof cases.$inferInsert;
 export type Review = typeof reviews.$inferSelect;
 export type InsertReview = typeof reviews.$inferInsert;
+export type ChapterVersion = typeof chapterVersions.$inferSelect;

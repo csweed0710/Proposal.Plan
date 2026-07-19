@@ -1,4 +1,6 @@
 export * from "./errors";
+export * from "./tables";
+import type { ChapterTable, ChapterTableType } from "./tables";
 
 // ============================================================================
 // 共用型別 — 前端後端都從這裡拿，任何補助案的格式都是資料，不是程式碼
@@ -11,6 +13,8 @@ export interface ChapterSpec {
   required: boolean;    // 是否為必要章節
   guidance: string;     // 寫作指引／評審重點（來自申請須知）
   weight?: number;      // 相對重要性 1–5（配分高低 → 篇幅分配）
+  tableType?: ChapterTableType; // 此章為結構化表格（預算/進度/KPI）——由公告宣告，不寫死
+  wordLimit?: number;   // 字數上限（官方規定，無則不填）
 }
 
 /** 官方評分標準中的一项 */
@@ -39,7 +43,25 @@ export interface CaseChapter {
   weight?: number;
   content: string;
   status: "empty" | "draft" | "done";
+  tableType?: ChapterTableType; // 快照自 ChapterSpec
+  table?: ChapterTable;         // 結構化表格資料（預算/進度/KPI）
+  wordLimit?: number;
 }
+
+/** 案件流程狀態（接案 pipeline） */
+export const CASE_STATUSES = [
+  { key: "intake", label: "問卷中" },
+  { key: "draft", label: "撰稿中" },
+  { key: "reviewing", label: "審核中" },
+  { key: "done", label: "已完成" },
+  { key: "submitted", label: "已送件" },
+  { key: "won", label: "得標" },
+  { key: "lost", label: "未通過" },
+] as const;
+export type CaseStatus = (typeof CASE_STATUSES)[number]["key"];
+export const CASE_STATUS_LABELS: Record<string, string> = Object.fromEntries(
+  CASE_STATUSES.map((s) => [s.key, s.label]),
+);
 
 /** 審核的一個面向 */
 export interface ReviewDimension {
@@ -77,15 +99,8 @@ export interface MatchResult {
   warnings: string[];
 }
 
-export const CASE_STATUSES = ["intake", "writing", "review", "done"] as const;
-export type CaseStatus = (typeof CASE_STATUSES)[number];
-
-export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
-  intake: "問卷收料",
-  writing: "撰寫中",
-  review: "審核中",
-  done: "已完成",
-};
+// 舊狀態鍵的相容標籤（歷史資料用，新流程請用上方的 CASE_STATUSES）
+Object.assign(CASE_STATUS_LABELS, { writing: "撰稿中", review: "審核中" });
 
 export const GRANT_CATEGORIES = [
   "創新研發",

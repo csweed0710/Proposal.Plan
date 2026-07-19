@@ -6,9 +6,98 @@
 import PizZip from "pizzip";
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType,
+  Table, TableRow, TableCell, WidthType,
 } from "docx";
 import type { CaseChapter } from "../../contracts/types";
+import { budgetRowTotal, budgetTotals } from "../../contracts/tables";
 import type { Case, Client, GrantProgram } from "../../db/schema";
+
+// ============================================================================
+// 結構化表格（預算/進度/KPI）→ 真正的 Word 表格
+// 先產生共用的「矩陣」，再依模式轉成 docx Table 或 raw w:tbl XML
+// ============================================================================
+const fmtNum = (n: number) => (n || 0).toLocaleString("en-US");
+
+interface Matrix {
+  header: string[];
+  rows: string[][];
+}
+
+function chapterMatrix(ch: CaseChapter): Matrix | null {
+  if (!ch.table) return null;
+  if (ch.table.type === "budget") {
+    const t = ch.table.budget;
+    if (t.rows.length === 0) return null;
+    const rows = t.rows.map((r) => [
+      r.item, r.detail, r.unit, String(r.qty ?? ""), fmtNum(r.unitPrice),
+      fmtNum(r.grantShare), fmtNum(r.selfShare), fmtNum(budgetRowTotal(r)), r.note,
+    ]);
+    const totals = budgetTotals(t);
+    rows.push(["合計", "", "", "", "", fmtNum(totals.grant), fmtNum(totals.self), fmtNum(totals.total), ""]);
+    return { header: ["科目", "內容說明", "單位", "數量", "單價", "補助款", "自籌款", "小計", "備註"], rows };
+  }
+  if (ch.table.type === "schedule") {
+    const t = ch.table.schedule;
+    if (t.rows.length === 0) return null;
+    const mcols = Array.from({ length: t.months }, (_, i) => String(i + 1));
+    const rows = t.rows.map((r) => [
+      r.task,
+      ...Array.from({ length: t.months }, (_, i) => (i + 1 >= r.startMonth && i + 1 <= r.endMonth ? "■" : "")),
+      r.checkpoint,
+    ]);
+    return { header: ["工作項目/月份", ...mcols, "查核點"], rows };
+  }
+  if (ch.table.type === "kpi") {
+    const t = ch.table.kpi;
+    if (t.rows.length === 0) return null;
+    return { header: ["效益指標", "目標值", "計算基準"], rows: t.rows.map((r) => [r.indicator, r.target, r.basis]) };
+  }
+  return null;
+}
+
+/** generic 模式用：docx 函式庫的真表格 */
+function docxTable(m: Matrix): Table {
+  const cellPara = (text: string, bold: boolean) =>
+    new Paragraph({ children: [new TextRun({ text, bold, font: EA, size: 18 })] });
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: m.header.map((h) => new TableCell({ shading: { fill: "EFE6DE" }, children: [cellPara(h, true)] })),
+      }),
+      ...m.rows.map(
+        (r) => new TableRow({ children: r.map((c) => new TableCell({ children: [cellPara(c, false)] })) }),
+      ),
+    ],
+  });
+}
+
+/** template / auto-map 模式用：raw WordprocessingML 表格 */
+function tableXml(m: Matrix): string {
+  const cols = m.header.length;
+  const w = Math.round(9000 / cols);
+  const cell = (text: string, header: boolean) =>
+    `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${header ? '<w:shd w:val="clear" w:fill="EFE6DE"/>' : ""}</w:tcPr>` +
+    `<w:p><w:r><w:rPr>${header ? "<w:b/>" : ""}<w:rFonts w:eastAsia="Microsoft JhengHei"/><w:sz w:val="18"/></w:rPr>` +
+    `<w:t xml:space="preserve">${esc(text)}</w:t></w:r></w:p></w:tc>`;
+  const row = (cells: string[], header: boolean) => `<w:tr>${cells.map((c) => cell(c, header)).join("")}</w:tr>`;
+  return (
+    `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>` +
+    `<w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"]
+      .map((b) => `<w:${b} w:val="single" w:sz="4" w:color="A6A6A6"/>`)
+      .join("")}</w:tblBorders></w:tblPr>` +
+    `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>` +
+    row(m.header, true) +
+    m.rows.map((r) => row(r, false)).join("") +
+    `</w:tbl>`
+  );
+}
+
+/** 章節的表格 XML（無表格回空字串） */
+function chapterTableXml(ch: CaseChapter): string {
+  const m = chapterMatrix(ch);
+  return m ? tableXml(m) : "";
+}
 
 // ---------- XML 工具 ----------
 const esc = (s: string) =>
@@ -102,7 +191,8 @@ export function fillTemplate(
         const ch = chapters.find((c) => c.key === chMatch[1]);
         if (ch) {
           mapped.push(ch.title);
-          seg.replacement = rebuildParagraph(seg.original, ch.content.trim() || `【待補】${ch.title}`);
+          // 敘述文字填入標記段，結構化表格以真表格接在後面
+          seg.replacement = rebuildParagraph(seg.original, ch.content.trim() || `【待補】${ch.title}`) + chapterTableXml(ch);
           continue;
         }
       }
@@ -129,7 +219,7 @@ export function fillTemplate(
         used.add(ch.key);
         mapped.push(ch.title);
         const body = (ch.content.trim() || `【待補】${ch.title}`).split(/\r?\n/).map(bodyPara).join("");
-        seg.replacement = seg.original + body;
+        seg.replacement = seg.original + body + chapterTableXml(ch);
       }
     }
     const leftover = chapters.filter((c) => !used.has(c.key));
@@ -139,7 +229,8 @@ export function fillTemplate(
         unmapped.push(ch.title);
         tail +=
           `<w:p><w:r><w:rPr><w:b/><w:rFonts w:eastAsia="Microsoft JhengHei"/><w:sz w:val="28"/></w:rPr><w:t xml:space="preserve">${esc(ch.title)}</w:t></w:r></w:p>` +
-          (ch.content.trim() || `【待補】${ch.title}`).split(/\r?\n/).map(bodyPara).join("");
+          (ch.content.trim() || `【待補】${ch.title}`).split(/\r?\n/).map(bodyPara).join("") +
+          chapterTableXml(ch);
       }
       segments[segments.length - 1].replacement += tail;
     }
@@ -170,7 +261,7 @@ export async function buildGenericDocx(
   client: Client,
   grant: GrantProgram,
 ): Promise<Uint8Array> {
-  const children: Paragraph[] = [];
+  const children: Array<Paragraph | Table> = [];
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -198,6 +289,12 @@ export async function buildGenericDocx(
       }),
       ...bodyLines(ch.content.trim() || `【待補】${ch.title}`),
     );
+    // 結構化表格 → 真表格（委員要看的是表格，不是段落）
+    const m = chapterMatrix(ch);
+    if (m) {
+      children.push(docxTable(m));
+      children.push(new Paragraph({ spacing: { after: 200 }, children: [] }));
+    }
   }
 
   const doc = new Document({
