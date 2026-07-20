@@ -98,8 +98,8 @@ export default function IntakeShare() {
             申請「{d.grantName}」（{d.agency}）
           </p>
           <p className="text-xs text-muted-foreground leading-relaxed max-w-md mx-auto">
-            請盡量具體填寫（數字、日期、名稱都很好），不確定的可以留空——
-            您的答案會成為計畫書各章節的素材，寫得越具體，計畫書越有說服力。
+            用自己的話回答就好——條列、口語都可以，每題下面的「例」只是示範，照那個感覺寫您真實的情況。
+            不確定的題目寫「不知道」沒關係，顧問會接手補強；您給的事實（數字、日期、名字）越多，計畫書就越有說服力。
           </p>
           {d.submittedAt && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 inline-block">
