@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { GRANT_CATEGORIES, ORG_TYPES, TEMPLATE_FIELDS, TABLE_TYPE_LABELS, type ChapterSpec, type ChapterTableType, type RubricItem } from "@contracts/types";
+import { GRANT_CATEGORIES, ORG_TYPES, TEMPLATE_FIELDS, TABLE_TYPE_LABELS, STANDARD_CHAPTERS, type ChapterSpec, type ChapterTableType, type RubricItem } from "@contracts/types";
 
 const emptyForm = {
   name: "", agency: "", category: "其他", description: "",
@@ -32,6 +32,9 @@ export default function GrantEdit() {
   const [rubric, setRubric] = useState<RubricItem[]>([]);
   const [pasteText, setPasteText] = useState("");
   const [showPaste, setShowPaste] = useState(isNew);
+  const [pickedFile, setPickedFile] = useState<{ name: string; data: Uint8Array } | null>(null);
+  const [parseInfo, setParseInfo] = useState<{ usedAI: boolean; warnings: string[] } | null>(null);
+  const announceFileRef = useRef<HTMLInputElement>(null);
 
   const existing = trpc.grants.get.useQuery({ id: Number(id) }, { enabled: !isNew });
   useEffect(() => {
@@ -55,20 +58,28 @@ export default function GrantEdit() {
 
   const parse = trpc.grants.parseAnnouncement.useMutation({
     onSuccess: (d) => {
+      // 全欄位對應：後端給的都帶進表單，使用者再逐一核對修正
       setForm((f) => ({
         ...f,
-        name: d.name || f.name, agency: (d as { agency?: string }).agency || f.agency,
-        category: (d as { category?: string }).category || f.category,
-        description: (d as { description?: string }).description || f.description,
-        applyStart: (d.applyStart as string | null) ?? f.applyStart,
-        applyEnd: (d.applyEnd as string | null) ?? f.applyEnd,
+        name: d.name || f.name,
+        agency: d.agency || f.agency,
+        category: d.category || f.category,
+        description: d.description || f.description,
+        applyStart: d.applyStart ?? f.applyStart,
+        applyEnd: d.applyEnd ?? f.applyEnd,
         rolling: Boolean(d.rolling),
-        deadlineNote: (d as { deadlineNote?: string }).deadlineNote ?? f.deadlineNote,
-        orgTypes: (d.orgTypes as string[] | undefined)?.length ? (d.orgTypes as string[]) : f.orgTypes,
+        deadlineNote: d.deadlineNote || f.deadlineNote,
+        amountMin: d.amountMin != null ? String(d.amountMin) : f.amountMin,
+        amountMax: d.amountMax != null ? String(d.amountMax) : f.amountMax,
+        selfFundNote: d.selfFundNote || f.selfFundNote,
+        orgTypes: d.orgTypes.length ? d.orgTypes : f.orgTypes,
+        eligibilityNote: d.eligibilityNote || f.eligibilityNote,
+        attachmentsNote: d.attachmentsNote || f.attachmentsNote,
         needsVerification: Boolean(d.needsVerification),
       }));
-      if ((d.chapterSchema as ChapterSpec[] | undefined)?.length) setChapters(d.chapterSchema as ChapterSpec[]);
-      if ((d.rubric as RubricItem[] | undefined)?.length) setRubric(d.rubric as RubricItem[]);
+      if (d.chapterSchema.length) setChapters(d.chapterSchema);
+      if (d.rubric.length) setRubric(d.rubric);
+      setParseInfo({ usedAI: d.usedAI, warnings: d.warnings });
     },
   });
 
@@ -92,6 +103,24 @@ export default function GrantEdit() {
       return next;
     });
 
+  const onPickAnnounce = async (f: File | undefined) => {
+    if (!f) return;
+    if (!/\.(pdf|docx|txt|md)$/i.test(f.name)) {
+      setParseInfo({ usedAI: false, warnings: ["只支援 PDF、Word(.docx)、純文字(.txt) 檔案"] });
+      return;
+    }
+    setPickedFile({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) });
+    if (announceFileRef.current) announceFileRef.current.value = "";
+  };
+
+  const canParse = pasteText.trim().length >= 20 || pickedFile != null;
+  const doParse = () =>
+    parse.mutate({
+      text: pasteText.trim() || undefined,
+      fileName: pickedFile?.name,
+      fileData: pickedFile?.data,
+    });
+
   const submit = () => {
     const payload = {
       ...form,
@@ -99,7 +128,8 @@ export default function GrantEdit() {
       applyEnd: form.applyEnd || null,
       amountMin: form.amountMin ? Number(form.amountMin) : null,
       amountMax: form.amountMax ? Number(form.amountMax) : null,
-      chapterSchema: chapters,
+      // 沒定章節也能存：自動用標準章節，之後隨時回來改
+      chapterSchema: chapters.length ? chapters : STANDARD_CHAPTERS,
       rubric,
     };
     if (isNew) save.mutate(payload);
@@ -124,15 +154,42 @@ export default function GrantEdit() {
         </CardHeader>
         {showPaste && (
           <CardContent className="space-y-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <input
+                ref={announceFileRef} type="file" accept=".pdf,.docx,.txt,.md" className="hidden"
+                onChange={(e) => onPickAnnounce(e.target.files?.[0])}
+              />
+              <Button variant="outline" onClick={() => announceFileRef.current?.click()} disabled={parse.isPending}>
+                <FileUp className="w-4 h-4 mr-1" /> 上傳公告檔（PDF / Word / 純文字）
+              </Button>
+              {pickedFile && (
+                <span className="text-sm flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-primary" /> {pickedFile.name}
+                  <button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => setPickedFile(null)}>✕</button>
+                </span>
+              )}
+              <span className="text-xs text-muted-foreground">掃描圖檔型 PDF 讀不到文字，請改用貼上</span>
+            </div>
             <Textarea
               rows={6}
-              placeholder="把補助案的申請須知、公告全文貼在這裡——系統會抽出申請期限、金額、資格、章節架構與評分配分，你再核對修正。"
+              placeholder="也可以直接把申請須知、公告全文貼在這裡——兩者併用也行。系統會抽出申請期限、金額、資格、章節架構與評分配分，並自動提議章節，你再核對修正。"
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
-            <Button variant="outline" disabled={pasteText.trim().length < 20 || parse.isPending} onClick={() => parse.mutate({ text: pasteText })}>
-              {parse.isPending ? "解析中…" : "解析公告"}
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button variant="outline" disabled={!canParse || parse.isPending} onClick={doParse}>
+                {parse.isPending ? "解析中（AI 約 10–30 秒）…" : "解析公告"}
+              </Button>
+              {parse.isError && <span className="text-sm text-destructive">{parse.error.message}</span>}
+            </div>
+            {parseInfo && (
+              <div className={`rounded-md border p-3 text-sm space-y-1 ${parseInfo.usedAI ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+                <p className="font-medium">
+                  {parseInfo.usedAI ? "AI 解析完成——以下欄位已帶入，請核對後儲存" : "規則解析完成（未啟用 AI）——錯誤率較高，請逐一核對"}
+                </p>
+                {parseInfo.warnings.map((w, i) => <p key={i}>⚠ {w}</p>)}
+              </div>
+            )}
           </CardContent>
         )}
       </Card>
@@ -227,16 +284,25 @@ export default function GrantEdit() {
       <Card className="mb-6">
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">官方章節格式（{chapters.length} 章）</CardTitle>
-          <Button
-            variant="outline" size="sm"
-            onClick={() => setChapters((cs) => [...cs, { key: `ch_${Date.now()}`, title: "新章節", required: true, guidance: "" }])}
-          >
-            <Plus className="w-4 h-4 mr-1" /> 加一章
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setChapters(STANDARD_CHAPTERS)}>
+              套用標準章節
+            </Button>
+            <Button
+              variant="outline" size="sm"
+              onClick={() => setChapters((cs) => [...cs, { key: `ch_${Date.now()}`, title: "新章節", required: true, guidance: "" }])}
+            >
+              <Plus className="w-4 h-4 mr-1" /> 加一章
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {chapters.length === 0 && (
-            <div className="text-sm text-muted-foreground">還沒有章節——貼上公告解析，或手動逐章新增。案件的章節結構完全由此決定。</div>
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>章節不用自己想了，三選一：</p>
+              <p>① 上面解析公告——系統自動提議章節（含寫作指引）；② 點「套用標準章節」用通用十章開始；③ 手動逐章新增。</p>
+              <p>直接儲存也可以——會自動先用標準章節，之後隨時回來改。</p>
+            </div>
           )}
           {chapters.map((c, i) => (
             <div key={c.key + i} className="border border-border rounded-lg p-3 space-y-2 bg-secondary/40">
@@ -293,6 +359,9 @@ export default function GrantEdit() {
               </div>
             </div>
           ))}
+          <p className="text-xs text-muted-foreground">
+            有得標範本、歷史案件或評分文件？儲存後到「參考資料庫」上傳並連結這個補助案——之後 AI 寫作會自動引用，越養越準。
+          </p>
         </CardContent>
       </Card>
 

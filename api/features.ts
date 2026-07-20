@@ -12,10 +12,11 @@ import { draftChapter } from "./engines/writer";
 import { runReview, aiSummary } from "./engines/review";
 import { applyRevision } from "./engines/revise";
 import { pickRefs, docxToText } from "./engines/reference";
-import { chat, llmStatus } from "./llm";
+import { llmStatus } from "./llm";
 import { exportCase } from "./engines/exporter";
 import { docxToPdf } from "./engines/pdf";
-import type { CaseChapter, ChapterSpec, RubricItem } from "../contracts/types";
+import type { CaseChapter } from "../contracts/types";
+import { analyzeAnnouncement, extractAnnouncementText } from "./engines/announce";
 
 const chapterSpec = z.object({
   key: z.string().min(1),
@@ -112,53 +113,7 @@ async function snapshotChapters(caseId: number, before: CaseChapter[], after: Ca
   if (rows.length) await getDb().insert(chapterVersions).values(rows);
 }
 
-// ---- 公告解析：貼上公告文字 → 結構化草稿（AI 優先，規則兜底） ------------
-function ruleParseAnnouncement(text: string) {
-  const rocYear = new Date().getFullYear() - 1911;
-  const dates: string[] = [];
-  for (const m of text.matchAll(/(\d{2,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)) {
-    const y = Number(m[1]) > 1911 ? Number(m[1]) : Number(m[1]) + 1911;
-    dates.push(`${y}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`);
-  }
-  const amounts = [...text.matchAll(/(\d[\d,]*)\s*(萬元|億元|萬|元)/g)].map((m) => m[0]);
-  const chapterMatches = [
-    ...text.matchAll(/(?:^|\n)\s*(?:第?[一二三四五六七八九十]+[、.．]|\d+[.、．])\s*(計畫摘要|緣起|背景|現況|目標|內容|執行|方法|策略|進度|時程|組織|團隊|人力|實績|經驗|預算|經費|效益|永續|風險|附件)[^\n]{0,20}/g),
-  ];
-  const chapters: ChapterSpec[] = chapterMatches.slice(0, 14).map((m, i) => ({
-    key: `ch_${i}`,
-    title: m[0].replace(/(?:^|\n)\s*(?:第?[一二三四五六七八九十]+[、.．]|\d+[.、．])\s*/, "").trim(),
-    required: true,
-    guidance: "",
-  }));
-  const rubricMatches = [...text.matchAll(/([^\n，。；]{2,12})[（(]?\s*(\d{1,2})\s*分[）)]?/g)];
-  const rubric: RubricItem[] = rubricMatches.slice(0, 8).map((m) => ({
-    item: m[1].trim(),
-    points: Number(m[2]),
-    description: "",
-  }));
-  return {
-    name: text.split("\n")[0]?.slice(0, 60) ?? "未命名補助案",
-    agency: "",
-    category: "其他",
-    description: text.slice(0, 500),
-    applyStart: dates[0] ?? null,
-    applyEnd: dates[dates.length - 1] ?? null,
-    rolling: /隨到隨|常年受理|随到随/.test(text),
-    deadlineNote: dates.length > 0 ? "" : `公告年份未明（民國 ${rocYear} 年前後），請確認`,
-    amountMin: null as number | null,
-    amountMax: null as number | null,
-    selfFundNote: amounts.slice(0, 3).join("、"),
-    orgTypes: ["公司", "社團法人", "財團法人"].filter((t) => text.includes(t)),
-    eligibilityNote: "",
-    chapterSchema: chapters,
-    rubric,
-    attachmentsNote: "",
-    sourceUrl: "",
-    status: "open",
-    needsVerification: true,
-    _amountHints: amounts.slice(0, 5),
-  };
-}
+// ---- 公告解析已搬到 engines/announce.ts（檔案擷取＋AI/規則雙層＋欄位消毒） ----
 
 // 範本檔很大（base64），列表/詳情一律不帶 templateData，只回 hasTemplate
 function stripTemplate<T extends { templateData: string | null }>(g: T) {
@@ -241,23 +196,26 @@ export const grantRouter = createRouter({
     return { ok: true };
   }),
 
-  parseAnnouncement: publicQuery.input(z.object({ text: z.string().min(20) })).mutation(async ({ input }) => {
-    const ai = await chat([
-      {
-        role: "system",
-        content:
-          "你是補助案公告解析器。從公告文字抽出結構化資料，只輸出 JSON：{\"name\",\"agency\",\"category\",\"applyStart\",\"applyEnd\",\"rolling\",\"amountMax\",\"orgTypes\":[],\"chapterSchema\":[{\"key\",\"title\",\"required\",\"guidance\"}],\"rubric\":[{\"item\",\"points\",\"description\"}]}。日期用 YYYY-MM-DD；找不到的欄位給 null 或空陣列。",
-      },
-      { role: "user", content: input.text.slice(0, 8000) },
-    ]);
-    if (ai) {
-      try {
-        const parsed = JSON.parse(ai.replace(/```json|```/g, "").trim());
-        return { ...ruleParseAnnouncement(input.text), ...parsed, needsVerification: false };
-      } catch { /* fall through */ }
-    }
-    return ruleParseAnnouncement(input.text);
-  }),
+  // 貼文字、上傳檔案（PDF/docx/txt），或兩者併用 → 結構化草稿＋自動提議章節
+  parseAnnouncement: publicQuery
+    .input(
+      z.object({
+        text: z.string().optional(),
+        fileName: z.string().optional(),
+        fileData: z.custom<Uint8Array>((v) => v instanceof Uint8Array).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const parts: string[] = [];
+      if (input.fileData && input.fileName) {
+        if (input.fileData.byteLength > 15 * 1024 * 1024) throw new Error("檔案太大（上限 15MB）");
+        parts.push(await extractAnnouncementText(input.fileName, input.fileData));
+      }
+      if (input.text?.trim()) parts.push(input.text.trim());
+      const combined = parts.join("\n");
+      if (combined.length < 20) throw new Error("請貼上公告文字（至少 20 字），或上傳 PDF / Word / 純文字檔");
+      return analyzeAnnouncement(combined);
+    }),
 });
 
 export const clientRouter = createRouter({

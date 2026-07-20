@@ -200,3 +200,46 @@ export interface ExportResult {
   unmapped: string[];  // 範本裡找不到位置、附在文末的章節標題
   data: Uint8Array;
 }
+
+// ============================================================================
+// 公告解析（新增補助案：貼文字或上傳 PDF/docx/txt → 結構化草稿）
+// ============================================================================
+
+export interface AnnouncementAnalysis {
+  name: string;
+  agency: string;
+  category: string;
+  description: string;
+  applyStart: string | null;   // YYYY-MM-DD
+  applyEnd: string | null;
+  rolling: boolean;
+  deadlineNote: string;
+  amountMin: number | null;    // 元
+  amountMax: number | null;    // 元
+  selfFundNote: string;
+  orgTypes: string[];
+  eligibilityNote: string;
+  attachmentsNote: string;
+  sourceUrl: string;
+  status: string;
+  needsVerification: boolean;  // 有欄位是猜的或找不到 → 提醒核對
+  chapterSchema: ChapterSpec[]; // 自動提議的章節（可改可刪可全丟換標準模板）
+  rubric: RubricItem[];
+  usedAI: boolean;             // false = 規則兜底，錯誤率較高
+  warnings: string[];          // 需要人工核對的地方，逐條列出
+  extractedChars: number;      // 實際送入解析的文字量
+}
+
+/** 標準章節模板：公告拿不到章節、或使用者還不確定時的安全起點（之後隨時可改） */
+export const STANDARD_CHAPTERS: ChapterSpec[] = [
+  { key: "std_1", title: "計畫摘要", required: true, guidance: "全案濃縮：為什麼做、做什麼、預期成果" },
+  { key: "std_2", title: "緣起與現況分析", required: true, guidance: "問題意識、現況痛點、需求分析" },
+  { key: "std_3", title: "計畫目標", required: true, guidance: "具體可衡量的目標，呼應補助案宗旨" },
+  { key: "std_4", title: "執行內容與方法", required: true, guidance: "工作項目、做法、執行策略" },
+  { key: "std_5", title: "組織與團隊", required: true, guidance: "執行團隊配置、分工、相關實績" },
+  { key: "std_6", title: "預定進度", required: true, guidance: "各階段時程與查核點", tableType: "schedule" },
+  { key: "std_7", title: "經費預算", required: true, guidance: "預算編列與說明，含自籌款", tableType: "budget" },
+  { key: "std_8", title: "預期效益", required: true, guidance: "量化與質化效益，對應評分項目", tableType: "kpi" },
+  { key: "std_9", title: "風險評估與應變", required: false, guidance: "可能風險與因應做法" },
+  { key: "std_10", title: "永續經營規劃", required: false, guidance: "補助結束後如何延續成果" },
+];
