@@ -15,6 +15,7 @@ export default function GrantDetail() {
   const g = trpc.grants.get.useQuery({ id: Number(id) });
   const remove = trpc.grants.remove.useMutation({
     onSuccess: () => { utils.grants.list.invalidate(); navigate("/grants"); },
+    onError: (e) => window.alert(e.message),
   });
 
   if (!g.data) return <div className="text-muted-foreground">載入中…</div>;

@@ -14,6 +14,7 @@ export default function ClientDetail() {
   const allCases = trpc.cases.list.useQuery();
   const remove = trpc.clients.remove.useMutation({
     onSuccess: () => { utils.clients.list.invalidate(); navigate("/clients"); },
+    onError: (e) => window.alert(e.message),
   });
 
   if (!c.data) return <div className="text-muted-foreground">載入中…</div>;

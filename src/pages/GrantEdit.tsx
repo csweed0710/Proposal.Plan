@@ -148,7 +148,7 @@ export default function GrantEdit() {
         <CardHeader className="cursor-pointer select-none" onClick={() => setShowPaste((s) => !s)}>
           <CardTitle className="text-base flex items-center gap-2">
             <ClipboardPaste className="w-4 h-4 text-accent" />
-            貼上公告文字，自動解析出章節格式與評分標準
+            貼上公告文字或上傳檔案，自動解析出章節格式與評分標準
             <span className="text-xs text-muted-foreground font-normal">（{showPaste ? "收合" : "展開"}）</span>
           </CardTitle>
         </CardHeader>

@@ -51,6 +51,7 @@ export default function References() {
   });
   const remove = trpc.references.remove.useMutation({
     onSuccess: () => utils.references.list.invalidate(),
+    onError: (e) => window.alert(e.message),
   });
 
   const onPick = async (f: File | undefined) => {
@@ -173,7 +174,7 @@ export default function References() {
                 <Button variant="ghost" size="icon" onClick={() => setViewId(d.id)} title="檢視全文">
                   <Eye className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => remove.mutate({ id: d.id })} title="刪除">
+                <Button variant="ghost" size="icon" onClick={() => { if (window.confirm(`確定刪除「${d.title}」？刪除後寫作時將不再引用。`)) remove.mutate({ id: d.id }); }} title="刪除" disabled={remove.isPending}>
                   <Trash2 className="w-4 h-4 text-destructive" />
                 </Button>
               </div>

@@ -162,6 +162,9 @@ export const grantRouter = createRouter({
   }),
 
   remove: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    // 擋下：還有案件連著這個補助案時不准刪，避免案件變「未知補助案」孤兒
+    const linked = await getDb().query.cases.findMany({ where: eq(cases.grantId, input.id) });
+    if (linked.length > 0) throw new Error(`這個補助案還有 ${linked.length} 個案件連著——請先到案件工作台刪除那些案件，才能刪補助案`);
     await getDb().delete(grantPrograms).where(eq(grantPrograms.id, input.id));
     return { ok: true };
   }),
@@ -241,6 +244,8 @@ export const clientRouter = createRouter({
   }),
 
   remove: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    const linked = await getDb().query.cases.findMany({ where: eq(cases.clientId, input.id) });
+    if (linked.length > 0) throw new Error(`這位客戶還有 ${linked.length} 個案件——請先刪除那些案件，才能刪客戶`);
     await getDb().delete(clients).where(eq(clients.id, input.id));
     return { ok: true };
   }),
@@ -280,6 +285,10 @@ export const caseRouter = createRouter({
       const client = await getDb().query.clients.findFirst({ where: eq(clients.id, input.clientId) });
       const grant = await getDb().query.grantPrograms.findFirst({ where: eq(grantPrograms.id, input.grantId) });
       if (!client || !grant) throw new Error("客戶或補助案不存在");
+      // 防呆：同客戶＋同補助案已有「進行中」案件就不准再開（結案的可以重開新案）
+      const existing = await getDb().query.cases.findMany({ where: and(eq(cases.clientId, input.clientId), eq(cases.grantId, input.grantId)) });
+      const active = existing.filter((k) => !["won", "lost"].includes(k.status));
+      if (active.length > 0) throw new Error(`「${client.name}」在這個補助案下已有進行中的案件（${active[0].title}）——請到案件工作台繼續那件，或先刪除它`);
       const chapters: CaseChapter[] = (grant.chapterSchema ?? []).map((s) => ({
         ...s, content: "", status: "empty" as const,
       }));
@@ -457,6 +466,7 @@ export const caseRouter = createRouter({
 
   remove: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
     await getDb().delete(reviews).where(eq(reviews.caseId, input.id));
+    await getDb().delete(chapterVersions).where(eq(chapterVersions.caseId, input.id));
     await getDb().delete(cases).where(eq(cases.id, input.id));
     return { ok: true };
   }),
@@ -752,6 +762,8 @@ export const radarRouter = createRouter({
   accept: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
     const c = await getDb().query.radarCandidates.findFirst({ where: eq(radarCandidates.id, input.id) });
     if (!c) throw new Error("候選不存在");
+    if (c.status === "accepted") throw new Error("這則候選已經收錄過了——到補助案列表找它即可");
+    if (c.status === "dismissed") throw new Error("這則候選已忽略，如需收錄請重新貼上公告");
     const descParts = [
       c.amountNote ? `補助金額：${c.amountNote}` : "",
       c.url ? `公告來源：${c.url}` : "",

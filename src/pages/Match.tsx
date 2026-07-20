@@ -118,6 +118,11 @@ export default function Match() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               建立後系統會：① 帶入「{creating?.grantName}」的官方章節格式與評分標準 ② 依章節自動生成專屬進場問卷 ③ 把客戶記憶預填進問卷。
             </p>
+            {createCase.isError && (
+              <p className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">
+                {createCase.error.message}
+              </p>
+            )}
             <Button
               className="w-full"
               disabled={!title.trim() || createCase.isPending}

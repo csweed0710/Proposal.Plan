@@ -150,14 +150,21 @@ export default function CaseDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [k.data]);
 
+  // 所有動作的錯誤統一收到這條橫幅——不再「點了沒反應」
+  const [actionError, setActionError] = useState("");
+  const onErr = (e: { message: string }) => setActionError(e.message);
+
   const saveIntake = trpc.cases.saveIntake.useMutation({
-    onSuccess: () => utils.cases.get.invalidate(),
+    onSuccess: () => { setActionError(""); utils.cases.get.invalidate(); },
+    onError: onErr,
   });
   const saveChapters = trpc.cases.saveChapters.useMutation({
-    onSuccess: () => utils.cases.get.invalidate(),
+    onSuccess: () => { setActionError(""); utils.cases.get.invalidate(); },
+    onError: onErr,
   });
   const draft = trpc.cases.draftChapter.useMutation({
     onSuccess: (d) => {
+      setActionError("");
       utils.cases.get.invalidate();
       setDraftInfo(
         d.usedAI
@@ -165,26 +172,33 @@ export default function CaseDetail() {
           : "已生成規則模式骨架（啟用 AI 可得全文）",
       );
     },
+    onError: onErr,
   });
   const runReview = trpc.review.run.useMutation({
-    onSuccess: () => { utils.cases.get.invalidate(); utils.review.list.invalidate(); utils.cases.list.invalidate(); },
+    onSuccess: () => { setActionError(""); utils.cases.get.invalidate(); utils.review.list.invalidate(); utils.cases.list.invalidate(); },
+    onError: onErr,
   });
-  const revise = trpc.review.reviseAndReview.useMutation();
+  const revise = trpc.review.reviseAndReview.useMutation({ onError: onErr });
   const setTargetScore = trpc.cases.setTargetScore.useMutation({
-    onSuccess: () => utils.cases.get.invalidate(),
+    onSuccess: () => { setActionError(""); utils.cases.get.invalidate(); },
+    onError: onErr,
   });
   const setStatus = trpc.cases.setStatus.useMutation({
-    onSuccess: () => { utils.cases.get.invalidate(); utils.cases.list.invalidate(); },
+    onSuccess: () => { setActionError(""); utils.cases.get.invalidate(); utils.cases.list.invalidate(); },
+    onError: onErr,
   });
   const setResult = trpc.cases.setResult.useMutation({
     onSuccess: () => {
+      setActionError("");
       setResultOpen(false);
       utils.cases.get.invalidate();
       utils.cases.list.invalidate();
     },
+    onError: onErr,
   });
   const shareLink = trpc.cases.shareLink.useMutation({
-    onSuccess: (d) => setShareUrl(`${window.location.origin}/intake/${d.token}`),
+    onSuccess: (d) => { setActionError(""); setShareUrl(`${window.location.origin}/intake/${d.token}`); },
+    onError: onErr,
   });
 
   // 送件／結果登錄對話框狀態
@@ -314,6 +328,13 @@ export default function CaseDetail() {
           </div>
         }
       />
+
+      {actionError && (
+        <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 text-destructive text-sm px-3 py-2 flex items-center justify-between gap-3">
+          <span>{actionError}</span>
+          <button type="button" className="text-xs underline shrink-0" onClick={() => setActionError("")}>關閉</button>
+        </div>
+      )}
 
       {/* 案件進度列：pipeline 狀態＋送件結果 */}
       <Card className="mb-5">

@@ -4,12 +4,16 @@ import type { Client, GrantProgram } from "../../db/schema";
 import { chat } from "../llm";
 import { refsPrompt, type RefDocInput } from "./reference";
 
+/** 「不知道／無／沒有」視同未答——不進素材，免得草稿出現「不知道」三個字 */
+const isBlankAnswer = (a: string) =>
+  !a.trim() || /^(不知道|不清楚|沒有|無|略|待確認|n\/?a|none)[。！!.,，]?$/i.test(a.trim());
+
 function chapterContext(
   ch: CaseChapter,
   qa: IntakeQuestion[],
 ): string {
   const answers = qa
-    .filter((q) => (q.chapterKey === ch.key || q.chapterKey === "__profile__" || q.chapterKey === "__rubric__") && q.answer.trim())
+    .filter((q) => (q.chapterKey === ch.key || q.chapterKey === "__profile__" || q.chapterKey === "__rubric__") && !isBlankAnswer(q.answer))
     .map((q) => `Q：${q.question}\nA：${q.answer.trim()}`)
     .join("\n");
   return answers || "（問卷尚無本章相關素材）";
@@ -47,7 +51,7 @@ export async function draftChapter(
   if (ai) return { content: ai.trim(), usedAI: true, usedRefs: used };
 
   // 規則模式：骨架＋問卷素材如實編排，不編造
-  const related = qa.filter((q) => q.chapterKey === ch.key && q.answer.trim());
+  const related = qa.filter((q) => q.chapterKey === ch.key && !isBlankAnswer(q.answer));
   const lines: string[] = [];
   lines.push(`（規則引擎草稿——未啟用 AI，以下為素材編排，請人工潤稿或啟用 AI 重寫）`);
   if (ch.guidance) lines.push(`寫作重點：${ch.guidance}`);

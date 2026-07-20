@@ -153,7 +153,10 @@ export default function ClientEdit() {
         </CardContent>
       </Card>
 
-      <div className="flex gap-3 pb-8">
+      <div className="flex gap-3 pb-8 items-center">
+        {(create.isError || update.isError) && (
+          <p className="text-sm text-destructive">{(create.error ?? update.error)?.message}</p>
+        )}
         <Button size="lg" onClick={submit} disabled={!form.name || create.isPending || update.isPending}>
           <Save className="w-4 h-4 mr-1" /> {isNew ? "建立客戶" : "儲存修改"}
         </Button>

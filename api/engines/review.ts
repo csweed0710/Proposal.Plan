@@ -57,7 +57,9 @@ function dimRubric(chapters: CaseChapter[], rubric: RubricItem[]): DimResult {
         chapterKey: "ALL",
         location: `評分項目「${r.item}」（${r.points} 分）`,
         problem: `計畫書中找不到足以對應「${r.item}」的內容（${r.description || "評分重點未涵蓋"}）`,
-        suggestion: `回到章節中補上與「${r.item}」直接相關的段落：${r.description || r.item}，並用具體數據或做法呈現`,
+        suggestion: r.description
+          ? `回到章節中補上與「${r.item}」直接相關的段落——${r.description}，並用具體數據或做法呈現`
+          : `回到章節中補上與「${r.item}」直接相關的段落，用具體數據或做法證明這一項的實力`,
       });
     }
   }
