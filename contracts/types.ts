@@ -151,6 +151,7 @@ export interface LlmStatus {
   configured: boolean;
   model: string;
   mode: "ai" | "rule";
+  lastError: string | null;  // 最近一次 AI 呼叫失敗原因（診斷用；成功後自動清空）
 }
 
 // ============================================================================

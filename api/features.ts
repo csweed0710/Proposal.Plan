@@ -1,17 +1,20 @@
 // 功能路由：補助案、客戶、適配、案件、問卷、寫作、審核、修改迴圈
 import { z } from "zod";
+import crypto from "node:crypto";
 import { eq, desc, and } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { grantPrograms, clients, cases, reviews, chapterVersions, referenceDocs } from "@db/schema";
+import { grantPrograms, clients, cases, reviews, chapterVersions, referenceDocs, radarCandidates } from "@db/schema";
+import { parseAnnouncements, scanMocSite } from "./engines/radar";
 import { matchAll } from "./engines/matching";
 import { generateIntake } from "./engines/intake";
 import { draftChapter } from "./engines/writer";
-import { runReview } from "./engines/review";
+import { runReview, aiSummary } from "./engines/review";
 import { applyRevision } from "./engines/revise";
 import { pickRefs, docxToText } from "./engines/reference";
 import { chat, llmStatus } from "./llm";
 import { exportCase } from "./engines/exporter";
+import { docxToPdf } from "./engines/pdf";
 import type { CaseChapter, ChapterSpec, RubricItem } from "../contracts/types";
 
 const chapterSpec = z.object({
@@ -479,10 +482,36 @@ export const caseRouter = createRouter({
     };
   }),
 
+  exportPdf: publicQuery.input(z.object({ id: z.number() })).query(async ({ input }) => {
+    const k = await mustGetCase(input.id);
+    const client = await getDb().query.clients.findFirst({ where: eq(clients.id, k.clientId) });
+    const grant = await getDb().query.grantPrograms.findFirst({ where: eq(grantPrograms.id, k.grantId) });
+    if (!client || !grant) throw new Error("缺少客戶或補助資料");
+    const result = await exportCase(k, client, grant);
+    const pdf = await docxToPdf(new Uint8Array(result.data));
+    const safeTitle = k.title.replace(/[\\/:*?"<>|]/g, "_");
+    return {
+      filename: `${safeTitle}.pdf`,
+      mode: result.mode,
+      data: pdf,
+    };
+  }),
+
   remove: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
     await getDb().delete(reviews).where(eq(reviews.caseId, input.id));
     await getDb().delete(cases).where(eq(cases.id, input.id));
     return { ok: true };
+  }),
+
+  // ---- 客戶自填連結：取得（或首次產生）專屬 token ----
+  shareLink: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    const k = await mustGetCase(input.id);
+    let token = k.intakeToken;
+    if (!token) {
+      token = crypto.randomBytes(24).toString("hex");
+      await getDb().update(cases).set({ intakeToken: token }).where(eq(cases.id, input.id));
+    }
+    return { token, submittedAt: k.intakeSubmittedAt };
   }),
 });
 
@@ -498,19 +527,21 @@ export const reviewRouter = createRouter({
     const k = await mustGetCase(input.caseId);
     const round = k.reviewRound + 1;
     const out = runReview(k.chapters ?? [], k.rubricSnapshot ?? [], round);
+    const summary = await aiSummary(k.chapters ?? [], out.dimensions, out.issues, k.rubricSnapshot ?? []);
     await getDb().insert(reviews).values({
       caseId: input.caseId,
       round,
       totalScore: out.totalScore,
       dimensions: out.dimensions,
       issues: out.issues,
+      aiSummary: summary,
     });
     await getDb().update(cases).set({
       currentScore: out.totalScore,
       reviewRound: round,
       status: out.totalScore >= k.targetScore ? "done" : "reviewing",
     }).where(eq(cases.id, input.caseId));
-    return { ...out, round, targetScore: k.targetScore, passed: out.totalScore >= k.targetScore };
+    return { ...out, round, targetScore: k.targetScore, passed: out.totalScore >= k.targetScore, aiSummary: summary };
   }),
 
   // 一鍵「接續修改」：修 → 再審，回傳兩步結果，前端可連續呼叫直到達標
@@ -536,6 +567,7 @@ export const reviewRouter = createRouter({
 
     const round = k.reviewRound + 1;
     const out = runReview(rev.chapters, k.rubricSnapshot ?? [], round);
+    const summary = await aiSummary(rev.chapters, out.dimensions, out.issues, k.rubricSnapshot ?? []);
     await getDb().insert(reviews).values({
       caseId: input.caseId,
       round,
@@ -543,6 +575,7 @@ export const reviewRouter = createRouter({
       dimensions: out.dimensions,
       issues: out.issues,
       note: rev.changeLog.join("\n"),
+      aiSummary: summary,
     });
     await getDb().update(cases).set({
       currentScore: out.totalScore,
@@ -556,6 +589,7 @@ export const reviewRouter = createRouter({
       round,
       targetScore: k.targetScore,
       passed: out.totalScore >= k.targetScore,
+      aiSummary: summary,
     };
   }),
 });
@@ -629,6 +663,166 @@ export const referenceRouter = createRouter({
 
   remove: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
     await getDb().delete(referenceDocs).where(eq(referenceDocs.id, input.id));
+    return { ok: true };
+  }),
+});
+
+// ============================================================================
+// 客戶自填問卷（分享連結）：不需登入，不可猜的 token 即存取權限
+// ============================================================================
+export const shareRouter = createRouter({
+  // 依 token 取問卷（含既有答案，客戶可續填）
+  getForm: publicQuery.input(z.object({ token: z.string().min(1) })).query(async ({ input }) => {
+    const k = await getDb().query.cases.findFirst({ where: eq(cases.intakeToken, input.token) });
+    if (!k) throw new Error("連結無效，請向您的提案顧問確認");
+    const grant = await getDb().query.grantPrograms.findFirst({ where: eq(grantPrograms.id, k.grantId) });
+    const client = await getDb().query.clients.findFirst({ where: eq(clients.id, k.clientId) });
+    const chapterTitles: Record<string, string> = {};
+    for (const c of k.chapters ?? []) chapterTitles[c.key] = c.title;
+    return {
+      caseTitle: k.title,
+      grantName: grant?.name ?? "",
+      agency: grant?.agency ?? "",
+      clientName: client?.name ?? "",
+      chapterTitles,
+      questions: k.intakeQA ?? [],
+      submittedAt: k.intakeSubmittedAt,
+    };
+  }),
+
+  // 客戶送出答案（依題目 id 寫回，保留未送題目的原值）
+  submit: publicQuery
+    .input(z.object({
+      token: z.string().min(1),
+      answers: z.array(z.object({ id: z.string(), answer: z.string() })),
+    }))
+    .mutation(async ({ input }) => {
+      const k = await getDb().query.cases.findFirst({ where: eq(cases.intakeToken, input.token) });
+      if (!k) throw new Error("連結無效，請向您的提案顧問確認");
+      const map = new Map(input.answers.map((a) => [a.id, a.answer]));
+      const intakeQA = (k.intakeQA ?? []).map((q) =>
+        map.has(q.id) ? { ...q, answer: map.get(q.id)! } : q,
+      );
+      await getDb().update(cases).set({
+        intakeQA: intakeQA as never,
+        intakeSubmittedAt: new Date(),
+      }).where(eq(cases.id, k.id));
+      return { ok: true };
+    }),
+});
+
+// ============================================================================
+// 補助雷達：收件匣 AI 解析＋自動掃描轉接器＋候選收錄
+// ============================================================================
+const RADAR_SOURCES = [{ key: "moc", label: "文化部獎補助資訊網", fn: scanMocSite }];
+
+/** 執行所有掃描轉接器並入庫（endpoint 與排程共用；單源失敗不影響其他源） */
+export async function runRadarScan() {
+  const today = new Date().toISOString().slice(0, 10);
+  const results: Array<{ source: string; label: string; found: number; added: number; error?: string }> = [];
+  for (const ad of RADAR_SOURCES) {
+    try {
+      const items = await ad.fn();
+      let added = 0;
+      for (const it of items) {
+        if (it.applyEnd && it.applyEnd < today) continue;
+        const dup = await getDb().query.radarCandidates.findFirst({
+          where: and(eq(radarCandidates.source, ad.key), eq(radarCandidates.title, it.title)),
+        });
+        if (dup) continue;
+        await getDb().insert(radarCandidates).values({
+          source: ad.key,
+          title: it.title,
+          agency: it.agency || null,
+          url: it.url || null,
+          applyStart: it.applyStart || null,
+          applyEnd: it.applyEnd || null,
+          amountNote: it.amountNote || null,
+          rawText: null,
+        });
+        added++;
+      }
+      results.push({ source: ad.key, label: ad.label, found: items.length, added });
+    } catch (e) {
+      results.push({
+        source: ad.key, label: ad.label, found: 0, added: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return { results, at: new Date().toISOString() };
+}
+
+export const radarRouter = createRouter({
+  list: publicQuery.query(async () => {
+    return getDb().query.radarCandidates.findMany({
+      orderBy: [desc(radarCandidates.id)],
+      limit: 200,
+    });
+  }),
+
+  // 收件匣：貼上公告或列表文字 → AI（或規則）解析 → 入候選區（自動略過已截止與重複）
+  paste: publicQuery.input(z.object({ text: z.string().min(10) })).mutation(async ({ input }) => {
+    const { items, usedAI } = await parseAnnouncements(input.text);
+    const today = new Date().toISOString().slice(0, 10);
+    let added = 0, skippedExpired = 0, skippedDup = 0;
+    for (const it of items) {
+      if (it.applyEnd && it.applyEnd < today) { skippedExpired++; continue; }
+      const dup = await getDb().query.radarCandidates.findFirst({
+        where: and(eq(radarCandidates.source, "paste"), eq(radarCandidates.title, it.title)),
+      });
+      if (dup) { skippedDup++; continue; }
+      await getDb().insert(radarCandidates).values({
+        source: "paste",
+        title: it.title,
+        agency: it.agency || null,
+        url: it.url || null,
+        applyStart: it.applyStart || null,
+        applyEnd: it.applyEnd || null,
+        amountNote: it.amountNote || null,
+        rawText: input.text.slice(0, 4000),
+      });
+      added++;
+    }
+    return { added, skippedExpired, skippedDup, usedAI, parsed: items.length };
+  }),
+
+  // 立即掃描全部轉接器
+  scan: publicQuery.mutation(async () => runRadarScan()),
+
+  // 收錄：候選轉正式補助案（草稿；章節與評分標準之後用「公告解析」補齊）
+  accept: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    const c = await getDb().query.radarCandidates.findFirst({ where: eq(radarCandidates.id, input.id) });
+    if (!c) throw new Error("候選不存在");
+    const descParts = [
+      c.amountNote ? `補助金額：${c.amountNote}` : "",
+      c.url ? `公告來源：${c.url}` : "",
+      "（由補助雷達收錄；請到編輯頁用「公告解析」補齊章節格式與評分標準）",
+    ].filter(Boolean);
+    const [{ id }] = await getDb().insert(grantPrograms).values({
+      name: c.title,
+      agency: c.agency || "待查證",
+      category: "其他",
+      description: descParts.join("\n"),
+      applyStart: c.applyStart ? new Date(c.applyStart) : null,
+      applyEnd: c.applyEnd ? new Date(c.applyEnd) : null,
+      rolling: !c.applyEnd,
+      deadlineNote: c.applyEnd ? "" : "時程待查證",
+      orgTypes: [],
+      eligibilityNote: "",
+      chapterSchema: [],
+      rubric: [],
+      attachmentsNote: "",
+      sourceUrl: c.url || "",
+      status: c.applyStart && c.applyStart > new Date().toISOString().slice(0, 10) ? "upcoming" : "open",
+      needsVerification: !c.applyEnd,
+    }).$returningId();
+    await getDb().update(radarCandidates).set({ status: "accepted" }).where(eq(radarCandidates.id, input.id));
+    return { grantId: id };
+  }),
+
+  dismiss: publicQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    await getDb().update(radarCandidates).set({ status: "dismissed" }).where(eq(radarCandidates.id, input.id));
     return { ok: true };
   }),
 });

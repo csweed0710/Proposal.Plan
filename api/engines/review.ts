@@ -6,6 +6,7 @@ import type {
   ReviewIssue,
   RubricItem,
 } from "../../contracts/types";
+import { chat } from "../llm";
 import {
   BANNED_BUDGET_KEYWORDS,
   budgetExpected,
@@ -366,4 +367,32 @@ export function runReview(chapters: CaseChapter[], rubric: RubricItem[], round: 
     .sort((a, b) => ({ high: 0, mid: 1, low: 2 })[a.severity] - { high: 0, mid: 1, low: 2 }[b.severity])
     .map((it, i) => ({ ...it, id: `r${round}_i${i}`, status: "open" as const }));
   return { totalScore, dimensions, issues };
+}
+
+// ---- 審稿模型：機器審核之外，由 LLM 以資深評審委員口吻給總評（未啟用 AI 時回傳 null）----
+export async function aiSummary(
+  chapters: CaseChapter[],
+  dimensions: ReviewDimension[],
+  issues: ReviewIssue[],
+  rubric: RubricItem[],
+): Promise<string | null> {
+  const dims = dimensions.map((d) => `${d.label} ${d.score} 分`).join("、");
+  const highs = issues
+    .filter((i) => i.severity === "high")
+    .slice(0, 5)
+    .map((i) => `【${i.location}】${i.problem}`)
+    .join("；");
+  const mids = issues.filter((i) => i.severity === "mid").length;
+  const rub = rubric.map((r) => `${r.item}（${r.points} 分）`).join("、") || "未提供";
+  return chat([
+    {
+      role: "system",
+      content:
+        "你是台灣政府補助案資深評審委員。看過數千件申請案，說話直接具體。以委員口吻寫 150–220 字總評：先點出最致命的弱點，再給最多 3 條具體可執行的補強建議（要指出是哪一章、補什麼）。禁用空泛形容詞，不要客套開場白。",
+    },
+    {
+      role: "user",
+      content: `官方評分標準：${rub}\n機器審核維度得分：${dims}\n高嚴重度問題：${highs || "無"}\n中嚴重度問題數：${mids}\n章節一覽：${chapters.map((c) => c.title).join("、")}`,
+    },
+  ]);
 }

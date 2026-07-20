@@ -11,10 +11,14 @@ import Match from "./pages/Match";
 import Cases from "./pages/Cases";
 import CaseDetail from "./pages/CaseDetail";
 import References from "./pages/References";
+import IntakeShare from "./pages/IntakeShare";
+import Radar from "./pages/Radar";
 
 export default function App() {
   return (
     <Routes>
+      {/* 客戶自填問卷：獨立版面，無側欄、無需登入 */}
+      <Route path="/intake/:token" element={<IntakeShare />} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/grants" element={<Grants />} />
@@ -29,6 +33,7 @@ export default function App() {
         <Route path="/cases" element={<Cases />} />
         <Route path="/cases/:id" element={<CaseDetail />} />
         <Route path="/references" element={<References />} />
+        <Route path="/radar" element={<Radar />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

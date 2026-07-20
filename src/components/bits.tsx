@@ -84,3 +84,15 @@ export function downloadDocx(data: Uint8Array, filename: string) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+export function downloadPdf(data: Uint8Array, filename: string) {
+  const blob = new Blob([data as BlobPart], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

@@ -100,6 +100,9 @@ export const cases = mysqlTable("cases", {
   submittedAt: timestamp("submitted_at"),       // 送件日期
   resultAmount: int("result_amount"),           // 得標／核定金額（未通過則留空）
   reviewFeedback: text("review_feedback"),      // 委員審查意見（下次投同案的秘密武器）
+  // ---- 客戶自填問卷（分享連結）----
+  intakeToken: varchar("intake_token", { length: 64 }),  // 不可猜的專屬連結憑證
+  intakeSubmittedAt: timestamp("intake_submitted_at"),   // 客戶送出時間
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
@@ -144,8 +147,27 @@ export const reviews = mysqlTable("reviews", {
   dimensions: json("dimensions").$type<ReviewDimension[]>().notNull(),
   issues: json("issues").$type<ReviewIssue[]>().notNull(),
   note: text("note"),
+  aiSummary: text("ai_summary"),   // LLM 總評（審稿模型；未啟用 AI 時為空）
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ============================================================================
+// 補助雷達：候選案件（收件匣 AI 解析／自動掃描轉接器）
+// ============================================================================
+export const radarCandidates = mysqlTable("radar_candidates", {
+  id: serial("id").primaryKey(),
+  source: varchar("source", { length: 50 }).notNull(),        // paste=收件匣、moc=文化部網站
+  title: varchar("title", { length: 300 }).notNull(),
+  agency: varchar("agency", { length: 120 }),
+  url: varchar("url", { length: 500 }),
+  applyStart: varchar("apply_start", { length: 40 }),         // YYYY-MM-DD 或空（待查證）
+  applyEnd: varchar("apply_end", { length: 40 }),
+  amountNote: varchar("amount_note", { length: 200 }),
+  rawText: text("raw_text"),                                  // 原文備查
+  status: varchar("status", { length: 20 }).notNull().default("new"), // new / accepted / dismissed
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type RadarCandidate = typeof radarCandidates.$inferSelect;
 
 export type GrantProgram = typeof grantPrograms.$inferSelect;
 export type InsertGrantProgram = typeof grantPrograms.$inferInsert;

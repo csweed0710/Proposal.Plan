@@ -3,9 +3,10 @@ import { useParams } from "react-router";
 import {
   Sparkles, Save, Play, Wrench, Repeat2, CheckCircle2,
   AlertTriangle, Info, CircleCheck, CircleDashed, FileDown, Send, History,
+  Share2, Copy, Check,
 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
-import { downloadDocx, PageHeader, ScoreBadge } from "@/components/bits";
+import { downloadDocx, downloadPdf, PageHeader, ScoreBadge } from "@/components/bits";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -129,6 +130,8 @@ export default function CaseDetail() {
   const [target, setTarget] = useState("85");
   const [looping, setLooping] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState("");
   const [exportInfo, setExportInfo] = useState<{
     mode: "template" | "auto-map" | "generic";
     mapped: string[];
@@ -180,6 +183,9 @@ export default function CaseDetail() {
       utils.cases.list.invalidate();
     },
   });
+  const shareLink = trpc.cases.shareLink.useMutation({
+    onSuccess: (d) => setShareUrl(`${window.location.origin}/intake/${d.token}`),
+  });
 
   // 送件／結果登錄對話框狀態
   const [resultOpen, setResultOpen] = useState(false);
@@ -191,6 +197,9 @@ export default function CaseDetail() {
   const [versionsOpen, setVersionsOpen] = useState(false);
   // 草稿生成結果提示
   const [draftInfo, setDraftInfo] = useState<string | null>(null);
+  // 客戶自填連結
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const latest = (reviewList.data ?? [])[0];
   const history = useMemo(() => [...(reviewList.data ?? [])].sort((a, b) => a.round - b.round), [reviewList.data]);
@@ -242,6 +251,19 @@ export default function CaseDetail() {
     }
   };
 
+  const doExportPdf = async () => {
+    setExportingPdf(true);
+    setPdfError("");
+    try {
+      const r = await utils.cases.exportPdf.fetch({ id: caseId });
+      downloadPdf(r.data, r.filename);
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : "PDF 轉檔失敗");
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const MODE_LABEL = {
     template: "官方範本填寫（精準對位）",
     "auto-map": "章節標題自動對應",
@@ -281,9 +303,13 @@ export default function CaseDetail() {
         action={
           <div className="flex items-center gap-3">
             <ScoreBadge score={k.data.currentScore} target={k.data.targetScore} />
-            <Button onClick={doExport} disabled={exporting}>
+            <Button onClick={doExport} disabled={exporting || exportingPdf}>
               <FileDown className="w-4 h-4 mr-1" />
               {exporting ? "產生中…" : "匯出 Word"}
+            </Button>
+            <Button variant="outline" onClick={doExportPdf} disabled={exporting || exportingPdf}>
+              <FileDown className="w-4 h-4 mr-1" />
+              {exportingPdf ? "轉檔中…" : "匯出 PDF"}
             </Button>
           </div>
         }
@@ -409,6 +435,11 @@ export default function CaseDetail() {
                 <span className="text-muted-foreground">匯出模式：</span>
                 <Badge variant="secondary">{MODE_LABEL[exportInfo.mode]}</Badge>
               </div>
+              {pdfError && (
+                <div className="rounded-md bg-destructive/10 border border-destructive/30 p-2.5 text-xs text-destructive">
+                  {pdfError}
+                </div>
+              )}
               {exportInfo.mapped.length > 0 && (
                 <div>
                   <div className="text-xs font-medium mb-1 text-emerald-700">已填入 {exportInfo.mapped.length} 個章節</div>
@@ -445,6 +476,55 @@ export default function CaseDetail() {
               這份問卷由「{grant?.name}」的官方章節格式與評分標準即時生成——換一個補助案，問題就不一樣。
               標示「已帶入」的題目是系統從客戶記憶自動填好的。
             </CardContent>
+          </Card>
+
+          {/* 客戶自填連結 */}
+          <Card className="mb-4">
+            <CardContent className="py-3 flex flex-wrap items-center gap-3">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Share2 className="w-3.5 h-3.5" /> 給客戶自己填：
+              </span>
+              {shareUrl ? (
+                <>
+                  <code className="text-xs bg-secondary rounded px-2 py-1 truncate max-w-md">{shareUrl}</code>
+                  <Button
+                    variant="outline" size="sm" className="h-7 text-xs"
+                    onClick={() => {
+                      navigator.clipboard.writeText(shareUrl).catch(() => {});
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    }}
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 mr-1 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
+                    {copied ? "已複製" : "複製連結"}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outline" size="sm" className="h-7 text-xs"
+                  disabled={shareLink.isPending}
+                  onClick={() => shareLink.mutate({ id: caseId })}
+                >
+                  {shareLink.isPending ? "產生中…" : "產生客戶填寫連結"}
+                </Button>
+              )}
+              <span className="text-xs ml-auto">
+                {k.data.intakeSubmittedAt ? (
+                  <span className="text-emerald-600 font-medium">
+                    客戶已於 {new Date(k.data.intakeSubmittedAt).toLocaleString("zh-TW", { hour12: false })} 送出
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">客戶尚未送出</span>
+                )}
+              </span>
+            </CardContent>
+            {shareUrl && (
+              <CardContent className="pt-0 pb-3">
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                  這條連結等同填寫權限，請只傳給客戶本人（LINE、Email 皆可）。客戶送出後，答案會直接出現在下方問卷裡，你檢查完按「儲存問卷，進入寫作」即可。
+                </p>
+              </CardContent>
+            )}
           </Card>
 
           {qaGroups.map((g) => (
@@ -653,6 +733,21 @@ export default function CaseDetail() {
                     )}
                   </CardContent>
                 </Card>
+
+                {(latest as { aiSummary?: string | null }).aiSummary && (
+                  <Card className="border-violet-200 bg-violet-50/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-violet-600" /> 評審總評（AI 審稿模型）
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap text-violet-900/90">
+                        {(latest as { aiSummary?: string | null }).aiSummary}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <Card>
                   <CardHeader><CardTitle className="text-base">五面向評分</CardTitle></CardHeader>

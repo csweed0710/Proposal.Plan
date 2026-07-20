@@ -30,4 +30,13 @@ if (env.isProduction) {
   serve({ fetch: app.fetch, port }, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // 補助雷達：每 6 小時背景掃描一次；失敗只記錄，不影響服務
+  const { runRadarScan } = await import("./features");
+  const scanOnce = () =>
+    runRadarScan()
+      .then((r) => console.log("[radar]", JSON.stringify(r.results.map((x) => ({ s: x.source, added: x.added, err: x.error ? 1 : 0 })))))
+      .catch((e) => console.warn("[radar] scan failed:", e));
+  setTimeout(scanOnce, 3 * 60 * 1000);       // 開機 3 分鐘後首掃
+  setInterval(scanOnce, 6 * 60 * 60 * 1000); // 之後每 6 小時
 }
