@@ -365,9 +365,20 @@ export const caseRouter = createRouter({
       const chapters = (k.chapters ?? []).map((c) =>
         c.key === input.chapterKey ? { ...c, content, status: "draft" as const } : c,
       );
+      const draftedChapter = chapters.find((c) => c.key === input.chapterKey)!;
+      const quality = await proposalQualityForCase(k, [draftedChapter]);
       await snapshotChapters(input.id, k.chapters ?? [], chapters, "AI 起草");
       await getDb().update(cases).set({ chapters, status: "draft" }).where(eq(cases.id, input.id));
-      return { content, usedAI, usedRefs };
+      return {
+        content,
+        usedAI,
+        usedRefs,
+        qualityGate: {
+          unsupportedClaims: quality.unsupportedClaims,
+          pendingCount: quality.pendingCount,
+          missingRequired: quality.missingRequired,
+        },
+      };
     }),
 
   // ---- 案件 pipeline：狀態流轉 ----
