@@ -48,7 +48,7 @@ export function evaluateProposalQuality(
   const highIssues = review.issues.filter((issue) => issue.severity === "high");
   const uncoveredRubric = evaluateRubricCoverage(chapters, rubric)
     .filter((item) => !item.covered)
-    .map(({ item, points }) => ({ item, points }));
+    .map(({ item, points, missingCriteria }) => ({ item, points, missingCriteria }));
 
   return {
     score: review.totalScore,

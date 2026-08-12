@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CaseChapter, RubricItem } from "../../contracts/types";
 import { evaluateProposalQuality } from "./proposal-quality";
+import { rubricCriteria } from "./review";
 
 const rubric: RubricItem[] = [
   { item: "執行可行性", points: 50, description: "服務流程、人力配置與量化成果" },
@@ -23,6 +24,11 @@ function limitedChapter(content: string, wordLimit: number): CaseChapter {
 }
 
 describe("提案品質閘門", () => {
+  it("不會把單一詞彙中的參與誤拆成兩個評分要求", () => {
+    expect(rubricCriteria({ item: "參與程度", points: 10, description: "社區參與程度" }))
+      .toEqual(["社區參與程度"]);
+  });
+
   it("將 percent 文字與百分比符號視為同一筆來源事實", () => {
     const content = "The verified satisfaction rate is 92%. ".repeat(8);
     const result = evaluateProposalQuality(
@@ -82,16 +88,27 @@ describe("提案品質閘門", () => {
       [],
     );
     expect(result.uncoveredRubric).toEqual([
-      { item: "執行可行性", points: 50 },
-      { item: "預期效益", points: 50 },
+      { item: "執行可行性", points: 50, missingCriteria: ["服務流程", "人力配置", "量化成果"] },
+      { item: "預期效益", points: 50, missingCriteria: ["受益人數", "場次", "追蹤方式"] },
     ]);
     expect(result.canAdvanceToHumanReview).toBe(false);
   });
 
   it("正文直接回應評分項目後才標示為已覆蓋", () => {
-    const content = "執行可行性包含服務流程與人力配置；預期效益包含受益人數、場次與追蹤方式。".repeat(8);
+    const content = "執行可行性包含服務流程、人力配置與量化成果；預期效益包含受益人數、場次與追蹤方式。".repeat(8);
     const result = evaluateProposalQuality([chapter(content)], rubric, []);
     expect(result.uncoveredRubric).toEqual([]);
+  });
+
+  it("只命中一個評分子要求時仍列出其餘缺漏", () => {
+    const content = "本計畫已建立服務流程，並將依流程執行各項工作。".repeat(10);
+    const result = evaluateProposalQuality([chapter(content)], rubric, []);
+    expect(result.uncoveredRubric[0]).toEqual({
+      item: "執行可行性",
+      points: 50,
+      missingCriteria: ["人力配置", "量化成果"],
+    });
+    expect(result.canAdvanceToHumanReview).toBe(false);
   });
 
   it("攔截超過官方章節字數上限的內容", () => {

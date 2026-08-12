@@ -33,6 +33,8 @@ export interface RubricCoverageItem {
   points: number;
   covered: boolean;
   matchedChapterKeys: string[];
+  criteria: string[];
+  missingCriteria: string[];
 }
 
 function clamp(n: number) {
@@ -45,6 +47,25 @@ export function requiredChapterMinimum(chapter: CaseChapter): number {
   return Math.min(120, Math.max(40, Math.floor(chapter.wordLimit * 0.6)));
 }
 
+/** 把官方評分說明拆成可個別驗證的核心要求。 */
+export function rubricCriteria(rubric: RubricItem): string[] {
+  const primary = rubric.description
+    .split(/[，、；：:。\s]/)
+    .map((criterion) => criterion.trim())
+    .filter(Boolean);
+  const details = primary
+    .flatMap((criterion) => {
+      // 有標點列舉時，連接詞通常也是並列要求；單一句子則只在兩側都夠長時拆分，
+      // 避免把「社區參與程度」之類詞彙錯拆成「社區參」與「程度」。
+      if (primary.length > 1) return criterion.split(/以及|並且|與|及|和/);
+      const pair = criterion.match(/^(.{4,}?)(?:以及|並且|與|及|和)(.{4,})$/);
+      return pair ? [pair[1], pair[2]] : [criterion];
+    })
+    .map((criterion) => criterion.trim())
+    .filter((criterion, index, all) => criterion.length >= 2 && all.indexOf(criterion) === index);
+  return details.length > 0 ? details : [rubric.item];
+}
+
 // ---- 面向一：評分標準對應 ------------------------------------------------
 /**
  * 評分項目必須實際出現在正文中才算覆蓋。
@@ -55,20 +76,26 @@ export function evaluateRubricCoverage(
   rubric: RubricItem[],
 ): RubricCoverageItem[] {
   return rubric.map((r) => {
-    const keys = [r.item, ...r.description.split(/[，、；：:。\s]/)]
-      .map((key) => key.trim())
-      .filter((key, index, all) => key.length >= 2 && all.indexOf(key) === index);
+    const criteria = rubricCriteria(r);
+    const eligibleChapters = chapters.filter(
+      (chapter) => chapter.content.trim().length >= requiredChapterMinimum(chapter),
+    );
+    const missingCriteria = criteria.filter(
+      (criterion) => !eligibleChapters.some((chapter) => chapter.content.includes(criterion)),
+    );
     const matchedChapterKeys = chapters
       .filter((chapter) =>
-        chapter.content.trim().length >= 120 &&
-        keys.some((key) => chapter.content.includes(key)),
+        chapter.content.trim().length >= requiredChapterMinimum(chapter) &&
+        criteria.some((criterion) => chapter.content.includes(criterion)),
       )
       .map((chapter) => chapter.key);
     return {
       item: r.item,
       points: r.points,
-      covered: matchedChapterKeys.length > 0,
+      covered: missingCriteria.length === 0,
       matchedChapterKeys,
+      criteria,
+      missingCriteria,
     };
   });
 }
@@ -94,9 +121,9 @@ function dimRubric(chapters: CaseChapter[], rubric: RubricItem[]): DimResult {
         dimension: "rubric",
         chapterKey: "ALL",
         location: `評分項目「${result.item}」（${result.points} 分）`,
-        problem: `計畫書中找不到足以對應「${r.item}」的內容（${r.description || "評分重點未涵蓋"}）`,
+        problem: `計畫書尚未完整回應「${r.item}」；缺少：${result.missingCriteria.join("、")}`,
         suggestion: r.description
-          ? `回到章節中補上與「${r.item}」直接相關的段落——${r.description}，並用具體數據或做法呈現`
+          ? `回到章節中逐一補上「${result.missingCriteria.join("、")}」，並用具體數據、做法或成果證明`
           : `回到章節中補上與「${r.item}」直接相關的段落，用具體數據或做法證明這一項的實力`,
       });
     }

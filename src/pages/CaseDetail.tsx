@@ -33,7 +33,7 @@ type ChapterDraftQuality = {
   pendingCount: number;
   missingRequired: string[];
   overWordLimit: Array<{ chapterKey: string; chapterTitle: string; actual: number; limit: number }>;
-  uncoveredRubric: Array<{ item: string; points: number }>;
+  uncoveredRubric: Array<{ item: string; points: number; missingCriteria: string[] }>;
 };
 
 function DimBar({ d }: { d: ReviewDimension }) {
@@ -764,7 +764,9 @@ export default function CaseDetail() {
                             <div>
                               整份提案尚未在正文直接回應的評分項目：
                               <span className="font-medium ml-1">
-                                {currentDraftQuality.uncoveredRubric.map((item) => `${item.item}（${item.points} 分）`).join("、")}
+                                {currentDraftQuality.uncoveredRubric.map((item) =>
+                                  `${item.item}（${item.points} 分；缺 ${item.missingCriteria.join("、")}）`,
+                                ).join("；")}
                               </span>
                             </div>
                           )}
