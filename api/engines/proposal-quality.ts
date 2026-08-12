@@ -1,7 +1,7 @@
 import type { CaseChapter, RubricItem } from "../../contracts/types";
 import { evaluateRubricCoverage, requiredChapterMinimum, runReview } from "./review";
 
-const FACT_PATTERN = /\d[\d,]*(?:\.\d+)?\s*(?:%|％|萬元|億元|萬|元|人次|人|場次|場|案|家|年|月|小時)/g;
+const FACT_PATTERN = /\d[\d,]*(?:\.\d+)?\s*(?:%|％|萬元|億元|人月|人次|場次|小時|萬|元|人|場|案|家|年|月|件|組|式|批|天|週|份)/g;
 
 function normalizeFact(value: string) {
   return value

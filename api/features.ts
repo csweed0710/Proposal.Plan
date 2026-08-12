@@ -18,6 +18,7 @@ import { docxToPdf } from "./engines/pdf";
 import type { CaseChapter } from "../contracts/types";
 import { analyzeAnnouncement, extractAnnouncementText } from "./engines/announce";
 import { evaluateProposalQuality } from "./engines/proposal-quality";
+import { chapterTableContext } from "./engines/table-context";
 
 const chapterSpec = z.object({
   key: z.string().min(1),
@@ -107,6 +108,7 @@ async function proposalQualityForCase(
     JSON.stringify(client ?? {}),
     JSON.stringify(grant ?? {}, (key, value) => key === "templateData" ? undefined : value),
     ...(k.intakeQA ?? []).map((q) => `${q.question}\n${q.answer}`),
+    ...chapters.map(chapterTableContext).filter(Boolean),
     ...relevantRefs.map((ref) => (ref.textContent ?? "").slice(0, 50000)),
   ];
   return evaluateProposalQuality(chapters, k.rubricSnapshot ?? [], sourceMaterials);
@@ -361,7 +363,15 @@ export const caseRouter = createRouter({
       if (!ch) throw new Error("章節不存在");
       const allRefs = await getDb().query.referenceDocs.findMany();
       const refs = pickRefs(allRefs, grant.id, ["example", "data", "feedback", "rubric_doc"]);
-      const { content, usedAI, usedRefs } = await draftChapter(ch, k.intakeQA ?? [], client, grant, k.rubricSnapshot ?? [], refs);
+      const { content, usedAI, usedRefs } = await draftChapter(
+        ch,
+        k.intakeQA ?? [],
+        client,
+        grant,
+        k.rubricSnapshot ?? [],
+        refs,
+        k.chapters ?? [],
+      );
       const chapters = (k.chapters ?? []).map((c) =>
         c.key === input.chapterKey ? { ...c, content, status: "draft" as const } : c,
       );

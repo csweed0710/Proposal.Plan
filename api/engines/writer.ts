@@ -3,6 +3,7 @@ import type { CaseChapter, IntakeQuestion, RubricItem } from "../../contracts/ty
 import type { Client, GrantProgram } from "../../db/schema";
 import { chat } from "../llm";
 import { refsPrompt, type RefDocInput } from "./reference";
+import { chapterTableContext } from "./table-context";
 
 const NUMERIC_SAFETY_PROMPT = `
 數字安全規則（強制）：
@@ -43,10 +44,12 @@ export async function draftChapter(
   grant: GrantProgram,
   rubric: RubricItem[],
   refs: RefDocInput[] = [],
+  allChapters: CaseChapter[] = [ch],
 ): Promise<{ content: string; usedAI: boolean; usedRefs: number }> {
   const context = chapterContext(ch, qa);
   const rubricText = rubric.map((r) => `${r.item}（${r.points} 分）：${r.description}`).join("；");
   const { text: refText, used } = refsPrompt(refs);
+  const tableText = allChapters.map(chapterTableContext).filter(Boolean).join("\n\n");
 
   const ai = await chat([
     {
@@ -56,13 +59,15 @@ export async function draftChapter(
         "評分標準不得只靠暗示：若某項標準與本章相關，正文必須逐一使用評分說明中的官方核心詞，每個核心詞後都要有具體做法、數據或成果證據；不得只回答其中一小部分，也不要把與本章無關的項目硬塞進來。" +
         "問卷答案是申請人用自己的話寫的日常碎片——可能口語、條列、不完整，甚至寫「不知道」。你的工作是理解其意、提煉成正式的計畫書論述，絕對不要照抄口語，也不要抱怨素材形式；答案說「不知道」或明顯缺漏的論點標【待補】。" +
         NUMERIC_SAFETY_PROMPT +
-        (refText ? "若提供得標範本，學習其結構與語氣但嚴禁抄襲內容；若提供委員意見，必須在內容中正面回應。" : ""),
+        (refText ? "若提供得標範本，學習其結構與語氣但嚴禁抄襲內容；若提供委員意見，必須在內容中正面回應。" : "") +
+        (tableText ? "結構化表格是申請人已確認的事實來源；正文必須與表格完全一致，不得改寫任何數字、期程或 KPI。" : ""),
     },
     {
       role: "user",
       content:
         `補助案：${grant.name}（${grant.agency}）\n申請單位：${client.name}（${client.orgType}）\n評分標準：${rubricText}\n\n` +
         (refText ? `${refText}\n\n` : "") +
+        (tableText ? `已確認的結構化表格：\n${tableText}\n\n` : "") +
         `請撰寫章節「${ch.title}」（${draftLengthInstruction(ch)}）。\n寫作重點：${ch.guidance || "依官方格式"}\n\n可用素材：\n${context}`,
     },
   ]);
