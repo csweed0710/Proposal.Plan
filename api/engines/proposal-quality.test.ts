@@ -18,6 +18,10 @@ function chapter(content: string): CaseChapter {
   };
 }
 
+function limitedChapter(content: string, wordLimit: number): CaseChapter {
+  return { ...chapter(content), wordLimit };
+}
+
 describe("提案品質閘門", () => {
   it("將 percent 文字與百分比符號視為同一筆來源事實", () => {
     const content = "The verified satisfaction rate is 92%. ".repeat(8);
@@ -88,5 +92,21 @@ describe("提案品質閘門", () => {
     const content = "執行可行性包含服務流程與人力配置；預期效益包含受益人數、場次與追蹤方式。".repeat(8);
     const result = evaluateProposalQuality([chapter(content)], rubric, []);
     expect(result.uncoveredRubric).toEqual([]);
+  });
+
+  it("攔截超過官方章節字數上限的內容", () => {
+    const content = "執行可行性與預期效益均有具體說明。".repeat(20);
+    const result = evaluateProposalQuality([limitedChapter(content, 100)], rubric, []);
+    expect(result.overWordLimit).toEqual([
+      { chapterKey: "implementation", chapterTitle: "執行內容與預期效益", actual: content.length, limit: 100 },
+    ]);
+    expect(result.canAdvanceToHumanReview).toBe(false);
+  });
+
+  it("官方短篇欄位使用相容於字數上限的最低完整度", () => {
+    const content = "執行可行性與預期效益都有明確做法與證據，內容精簡並符合官方格式要求。".repeat(2).slice(0, 60);
+    const result = evaluateProposalQuality([limitedChapter(content, 100)], rubric, []);
+    expect(result.missingRequired).toEqual([]);
+    expect(result.overWordLimit).toEqual([]);
   });
 });

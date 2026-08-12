@@ -32,6 +32,7 @@ type ChapterDraftQuality = {
   unsupportedClaims: Array<{ chapterKey: string; chapterTitle: string; claim: string }>;
   pendingCount: number;
   missingRequired: string[];
+  overWordLimit: Array<{ chapterKey: string; chapterTitle: string; actual: number; limit: number }>;
   uncoveredRubric: Array<{ item: string; points: number }>;
 };
 
@@ -731,7 +732,7 @@ export default function CaseDetail() {
                       placeholder={current.tableType ? "表格之外的補充說明文字（如經費編列原則、指標設定理念）…" : "從右上的「生成草稿」開始，或直接撰寫／貼上內容。"}
                     />
                     {currentDraftQuality && (
-                      currentDraftQuality.unsupportedClaims.length > 0 || currentDraftQuality.pendingCount > 0 || currentDraftQuality.missingRequired.length > 0 || currentDraftQuality.uncoveredRubric.length > 0 ? (
+                      currentDraftQuality.unsupportedClaims.length > 0 || currentDraftQuality.pendingCount > 0 || currentDraftQuality.missingRequired.length > 0 || currentDraftQuality.overWordLimit.length > 0 || currentDraftQuality.uncoveredRubric.length > 0 ? (
                         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 space-y-2">
                           <div className="font-semibold flex items-center gap-2">
                             <AlertTriangle className="w-4 h-4 text-amber-700" />
@@ -749,7 +750,15 @@ export default function CaseDetail() {
                             </div>
                           )}
                           {currentDraftQuality.missingRequired.length > 0 && (
-                            <div>必要章節內容仍不足 120 字：{currentDraftQuality.missingRequired.join("、")}。</div>
+                            <div>必要章節內容尚未達基本完整度：{currentDraftQuality.missingRequired.join("、")}。</div>
+                          )}
+                          {currentDraftQuality.overWordLimit.length > 0 && (
+                            <div>
+                              超過官方字數上限：
+                              <span className="font-medium ml-1">
+                                {currentDraftQuality.overWordLimit.map((item) => `${item.chapterTitle} ${item.actual}/${item.limit} 字`).join("、")}
+                              </span>
+                            </div>
                           )}
                           {currentDraftQuality.uncoveredRubric.length > 0 && (
                             <div>
@@ -771,7 +780,9 @@ export default function CaseDetail() {
                       )
                     )}
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-muted-foreground">{current.content.trim().length} 字</span>
+                      <span className={`text-xs ${current.wordLimit && current.content.trim().length > current.wordLimit ? "font-semibold text-red-600" : "text-muted-foreground"}`}>
+                        {current.content.trim().length} 字{current.wordLimit ? ` / 上限 ${current.wordLimit} 字` : ""}
+                      </span>
                       {draftInfo && (
                         <span className="text-xs text-emerald-600 flex items-center gap-1 truncate">
                           <Sparkles className="w-3 h-3 shrink-0" /> {draftInfo}

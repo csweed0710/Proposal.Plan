@@ -1,5 +1,5 @@
 import type { CaseChapter, RubricItem } from "../../contracts/types";
-import { evaluateRubricCoverage, runReview } from "./review";
+import { evaluateRubricCoverage, requiredChapterMinimum, runReview } from "./review";
 
 const FACT_PATTERN = /\d[\d,]*(?:\.\d+)?\s*(?:%|％|萬元|億元|萬|元|人次|人|場次|場|案|家|年|月|小時)/g;
 
@@ -35,8 +35,16 @@ export function evaluateProposalQuality(
     0,
   );
   const missingRequired = chapters
-    .filter((chapter) => chapter.required && chapter.content.trim().length < 120)
+    .filter((chapter) => chapter.required && chapter.content.trim().length < requiredChapterMinimum(chapter))
     .map((chapter) => chapter.title);
+  const overWordLimit = chapters
+    .filter((chapter) => chapter.wordLimit && chapter.content.trim().length > chapter.wordLimit)
+    .map((chapter) => ({
+      chapterKey: chapter.key,
+      chapterTitle: chapter.title,
+      actual: chapter.content.trim().length,
+      limit: chapter.wordLimit!,
+    }));
   const highIssues = review.issues.filter((issue) => issue.severity === "high");
   const uncoveredRubric = evaluateRubricCoverage(chapters, rubric)
     .filter((item) => !item.covered)
@@ -49,6 +57,7 @@ export function evaluateProposalQuality(
     unsupportedClaims,
     pendingCount,
     missingRequired,
+    overWordLimit,
     uncoveredRubric,
     canAdvanceToHumanReview:
       review.totalScore >= 75 &&
@@ -56,6 +65,7 @@ export function evaluateProposalQuality(
       unsupportedClaims.length === 0 &&
       pendingCount === 0 &&
       missingRequired.length === 0 &&
+      overWordLimit.length === 0 &&
       uncoveredRubric.length === 0,
   };
 }
