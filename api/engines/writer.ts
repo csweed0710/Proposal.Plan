@@ -17,6 +17,13 @@ const NUMERIC_SAFETY_PROMPT = `
 const isBlankAnswer = (a: string) =>
   !a.trim() || /^(不知道|不清楚|沒有|無|略|待確認|n\/?a|none)[。！!.,，]?$/i.test(a.trim());
 
+/** 依公告的章節字數上限產生明確篇幅指令，預留人工補充空間。 */
+export function draftLengthInstruction(ch: CaseChapter): string {
+  if (!ch.wordLimit) return "約 600–900 字";
+  const target = Math.max(40, Math.floor(ch.wordLimit * 0.85));
+  return `官方上限 ${ch.wordLimit} 字；正文不得超過上限，建議控制在 ${target} 字內`;
+}
+
 function chapterContext(
   ch: CaseChapter,
   qa: IntakeQuestion[],
@@ -56,7 +63,7 @@ export async function draftChapter(
       content:
         `補助案：${grant.name}（${grant.agency}）\n申請單位：${client.name}（${client.orgType}）\n評分標準：${rubricText}\n\n` +
         (refText ? `${refText}\n\n` : "") +
-        `請撰寫章節「${ch.title}」（約 600–900 字）。\n寫作重點：${ch.guidance || "依官方格式"}\n\n可用素材：\n${context}`,
+        `請撰寫章節「${ch.title}」（${draftLengthInstruction(ch)}）。\n寫作重點：${ch.guidance || "依官方格式"}\n\n可用素材：\n${context}`,
     },
   ]);
   if (ai) return { content: ai.trim(), usedAI: true, usedRefs: used };

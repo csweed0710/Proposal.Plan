@@ -39,6 +39,12 @@ function clamp(n: number) {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+/** 短篇官方欄位不能用固定 120 字門檻，否則「達最低量」會與字數上限互相矛盾。 */
+export function requiredChapterMinimum(chapter: CaseChapter): number {
+  if (!chapter.wordLimit) return 120;
+  return Math.min(120, Math.max(40, Math.floor(chapter.wordLimit * 0.6)));
+}
+
 // ---- 面向一：評分標準對應 ------------------------------------------------
 /**
  * 評分項目必須實際出現在正文中才算覆蓋。
@@ -134,6 +140,7 @@ function dimStructure(chapters: CaseChapter[]): DimResult {
   const issues: DimResult["issues"] = [];
   let lost = 0;
   for (const ch of chapters) {
+    const minimumLength = requiredChapterMinimum(ch);
     if (ch.required && ch.content.trim().length === 0) {
       lost += 30;
       issues.push({
@@ -144,14 +151,14 @@ function dimStructure(chapters: CaseChapter[]): DimResult {
         problem: "必要章節完全沒有內容",
         suggestion: "先在寫作台產生草稿，或回到問卷補齊本章素材",
       });
-    } else if (ch.required && ch.content.trim().length < 120) {
+    } else if (ch.required && ch.content.trim().length < minimumLength) {
       lost += 12;
       issues.push({
         severity: "mid",
         dimension: "structure",
         chapterKey: ch.key,
         location: `「${ch.title}」`,
-        problem: `內容僅 ${ch.content.trim().length} 字，明顯單薄`,
+        problem: `內容僅 ${ch.content.trim().length} 字，未達本章基本完整度 ${minimumLength} 字`,
         suggestion: `依本章指引擴寫：${ch.guidance || "補充具體做法與數據"}`,
       });
     }
@@ -170,7 +177,7 @@ function dimStructure(chapters: CaseChapter[]): DimResult {
   }
   const score = clamp(100 - lost);
   return {
-    dim: { key: "structure", label: "結構與格式符合", score, weight: 0.2, summary: `${chapters.filter((c) => c.required && c.content.trim().length >= 120).length}/${chapters.filter((c) => c.required).length} 個必要章節達基本量` },
+    dim: { key: "structure", label: "結構與格式符合", score, weight: 0.2, summary: `${chapters.filter((c) => c.required && c.content.trim().length >= requiredChapterMinimum(c)).length}/${chapters.filter((c) => c.required).length} 個必要章節達基本量` },
     issues,
   };
 }

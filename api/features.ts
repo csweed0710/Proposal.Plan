@@ -377,6 +377,7 @@ export const caseRouter = createRouter({
           unsupportedClaims: quality.unsupportedClaims,
           pendingCount: quality.pendingCount,
           missingRequired: quality.missingRequired,
+          overWordLimit: quality.overWordLimit,
           uncoveredRubric: quality.uncoveredRubric,
         },
       };
@@ -564,6 +565,7 @@ export const reviewRouter = createRouter({
         unsupportedClaims: quality.unsupportedClaims,
         pendingCount: quality.pendingCount,
         missingRequired: quality.missingRequired,
+        overWordLimit: quality.overWordLimit,
         uncoveredRubric: quality.uncoveredRubric,
       },
       aiSummary: summary,
@@ -631,6 +633,7 @@ export const reviewRouter = createRouter({
         unsupportedClaims: quality.unsupportedClaims,
         pendingCount: quality.pendingCount,
         missingRequired: quality.missingRequired,
+        overWordLimit: quality.overWordLimit,
         uncoveredRubric: quality.uncoveredRubric,
       },
       aiSummary: summary,
