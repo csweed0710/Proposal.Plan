@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router";
 import {
   LayoutDashboard,
   Landmark,
+  Menu,
   Radar,
   Users,
   Target,
@@ -11,9 +12,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
+import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
 
 const NAV = [
   { to: "/", label: "總覽", icon: LayoutDashboard, end: true },
@@ -29,61 +34,105 @@ export default function Layout() {
   const status = trpc.meta.status.useQuery(undefined, { staleTime: 30000 });
   const llm = status.data?.llm;
   const [aiOpen, setAiOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const navigation = (onNavigate?: () => void) => (
+    <nav aria-label="主要導覽" className="flex-1 p-3 space-y-1">
+      {NAV.map((n) => (
+        <NavLink
+          key={n.to}
+          to={n.to}
+          end={n.end as boolean | undefined}
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            `flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              isActive
+                ? "bg-[hsl(var(--sidebar-accent))] text-primary font-semibold"
+                : "text-[hsl(var(--sidebar-foreground))] hover:bg-[hsl(var(--sidebar-accent))]/60"
+            }`
+          }
+        >
+          <n.icon className="w-4 h-4" aria-hidden="true" />
+          {n.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+
+  const aiStatusButton = (onClick?: () => void) => (
+    <button
+      type="button"
+      onClick={() => {
+        onClick?.();
+        setAiOpen(true);
+      }}
+      className={`w-full min-h-11 flex items-center gap-2 text-xs px-3 py-2 rounded-lg transition-opacity hover:opacity-80 ${
+        llm?.configured
+          ? llm.lastError
+            ? "bg-red-50 text-red-700"
+            : "bg-emerald-50 text-emerald-700"
+          : "bg-amber-50 text-amber-700"
+      }`}
+    >
+      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+      {llm?.configured
+        ? llm.lastError
+          ? "AI 異常・點我檢查"
+          : `AI 模式（${llm.model}）`
+        : "規則引擎模式・點我啟用 AI"}
+    </button>
+  );
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen">
+      <header className="md:hidden sticky top-0 z-40 h-16 px-4 flex items-center gap-3 border-b bg-background/95 backdrop-blur">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-11"
+          aria-label="開啟主選單"
+          onClick={() => setMobileOpen(true)}
+        >
+          <Menu className="size-5" aria-hidden="true" />
+        </Button>
+        <div className="min-w-0">
+          <div className="font-bold text-primary truncate">計畫書接案系統</div>
+          <div className="text-xs text-muted-foreground truncate">補助案 × 客戶 × 審核迴圈</div>
+        </div>
+      </header>
+
       {/* 側邊欄 */}
-      <aside className="w-60 shrink-0 bg-[hsl(var(--sidebar-background))] border-r border-[hsl(var(--sidebar-border))] flex flex-col fixed inset-y-0">
+      <aside className="hidden md:flex w-60 shrink-0 bg-[hsl(var(--sidebar-background))] border-r border-[hsl(var(--sidebar-border))] flex-col fixed inset-y-0">
         <div className="px-5 py-6 border-b border-[hsl(var(--sidebar-border))]">
           <div className="text-lg font-bold text-primary leading-tight">計畫書接案系統</div>
           <div className="text-xs text-muted-foreground mt-1">補助案 × 客戶 × 審核迴圈</div>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
-          {NAV.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.end as boolean | undefined}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? "bg-[hsl(var(--sidebar-accent))] text-primary font-semibold"
-                    : "text-[hsl(var(--sidebar-foreground))] hover:bg-[hsl(var(--sidebar-accent))]/60"
-                }`
-              }
-            >
-              <n.icon className="w-4 h-4" />
-              {n.label}
-            </NavLink>
-          ))}
-        </nav>
+        {navigation()}
         <div className="p-4 border-t border-[hsl(var(--sidebar-border))]">
-          <button
-            onClick={() => setAiOpen(true)}
-            className={`w-full flex items-center gap-2 text-xs px-3 py-2 rounded-lg transition-opacity hover:opacity-80 ${
-              llm?.configured
-                ? llm.lastError
-                  ? "bg-red-50 text-red-700"
-                  : "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700"
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            {llm?.configured
-              ? llm.lastError
-                ? "AI 異常・點我檢查"
-                : `AI 模式（${llm.model}）`
-              : "規則引擎模式・點我啟用 AI"}
-          </button>
+          {aiStatusButton()}
         </div>
       </aside>
 
       {/* 主內容 */}
-      <main className="flex-1 ml-60 min-w-0">
-        <div className="max-w-6xl mx-auto px-8 py-8">
+      <main className="min-w-0 md:ml-60">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 md:px-8 py-5 md:py-8">
           <Outlet />
         </div>
       </main>
+
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-[min(20rem,85vw)] p-0 gap-0 bg-[hsl(var(--sidebar-background))]">
+          <SheetHeader className="px-5 py-6 text-left border-b border-[hsl(var(--sidebar-border))]">
+            <SheetTitle className="text-lg text-primary">計畫書接案系統</SheetTitle>
+            <SheetDescription>補助案 × 客戶 × 審核迴圈</SheetDescription>
+          </SheetHeader>
+          {navigation(() => setMobileOpen(false))}
+          <div className="p-4 border-t border-[hsl(var(--sidebar-border))]">
+            {aiStatusButton(() => setMobileOpen(false))}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* AI 狀態與啟用教學 */}
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>

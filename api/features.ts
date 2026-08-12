@@ -17,6 +17,7 @@ import { exportCase } from "./engines/exporter";
 import { docxToPdf } from "./engines/pdf";
 import type { CaseChapter } from "../contracts/types";
 import { analyzeAnnouncement, extractAnnouncementText } from "./engines/announce";
+import { evaluateProposalQuality } from "./engines/proposal-quality";
 
 const chapterSpec = z.object({
   key: z.string().min(1),
@@ -90,6 +91,25 @@ async function mustGetCase(caseId: number) {
   const row = await getDb().query.cases.findFirst({ where: eq(cases.id, caseId) });
   if (!row) throw new Error("案件不存在");
   return row;
+}
+
+async function proposalQualityForCase(
+  k: Awaited<ReturnType<typeof mustGetCase>>,
+  chapters: CaseChapter[],
+) {
+  const [client, grant, refs] = await Promise.all([
+    getDb().query.clients.findFirst({ where: eq(clients.id, k.clientId) }),
+    getDb().query.grantPrograms.findFirst({ where: eq(grantPrograms.id, k.grantId) }),
+    getDb().query.referenceDocs.findMany(),
+  ]);
+  const relevantRefs = refs.filter((ref) => ref.grantId == null || ref.grantId === k.grantId);
+  const sourceMaterials = [
+    JSON.stringify(client ?? {}),
+    JSON.stringify(grant ?? {}, (key, value) => key === "templateData" ? undefined : value),
+    ...(k.intakeQA ?? []).map((q) => `${q.question}\n${q.answer}`),
+    ...relevantRefs.map((ref) => (ref.textContent ?? "").slice(0, 50000)),
+  ];
+  return evaluateProposalQuality(chapters, k.rubricSnapshot ?? [], sourceMaterials);
 }
 
 // ---- 版本快照：覆寫章節「前」把舊狀態存進 chapter_versions，之後可回看、可還原 ----
@@ -495,21 +515,46 @@ export const reviewRouter = createRouter({
     const k = await mustGetCase(input.caseId);
     const round = k.reviewRound + 1;
     const out = runReview(k.chapters ?? [], k.rubricSnapshot ?? [], round);
-    const summary = await aiSummary(k.chapters ?? [], out.dimensions, out.issues, k.rubricSnapshot ?? []);
+    const quality = await proposalQualityForCase(k, k.chapters ?? []);
+    const provenanceIssues = quality.unsupportedClaims.map((claim, index) => ({
+      id: `r${round}_fact${index}`,
+      severity: "high" as const,
+      dimension: "evidence",
+      chapterKey: claim.chapterKey,
+      location: `「${claim.chapterTitle}」`,
+      problem: `數字主張「${claim.claim}」在客戶資料、問卷、公告與參考資料中找不到來源`,
+      suggestion: "請向客戶確認數字並補入問卷或參考資料；若無法證實，請刪除或標記【待補】",
+      status: "open" as const,
+    }));
+    const issues = [...out.issues, ...provenanceIssues];
+    const passed = out.totalScore >= k.targetScore && quality.canAdvanceToHumanReview;
+    const summary = await aiSummary(k.chapters ?? [], out.dimensions, issues, k.rubricSnapshot ?? []);
     await getDb().insert(reviews).values({
       caseId: input.caseId,
       round,
       totalScore: out.totalScore,
       dimensions: out.dimensions,
-      issues: out.issues,
+      issues,
       aiSummary: summary,
     });
     await getDb().update(cases).set({
       currentScore: out.totalScore,
       reviewRound: round,
-      status: out.totalScore >= k.targetScore ? "done" : "reviewing",
+      status: passed ? "done" : "reviewing",
     }).where(eq(cases.id, input.caseId));
-    return { ...out, round, targetScore: k.targetScore, passed: out.totalScore >= k.targetScore, aiSummary: summary };
+    return {
+      ...out,
+      issues,
+      round,
+      targetScore: k.targetScore,
+      passed,
+      qualityGate: {
+        unsupportedClaims: quality.unsupportedClaims,
+        pendingCount: quality.pendingCount,
+        missingRequired: quality.missingRequired,
+      },
+      aiSummary: summary,
+    };
   }),
 
   // 一鍵「接續修改」：修 → 再審，回傳兩步結果，前端可連續呼叫直到達標
@@ -527,36 +572,53 @@ export const reviewRouter = createRouter({
         chapterAnswers[q.chapterKey] = [...(chapterAnswers[q.chapterKey] ?? []), `${q.question}：${q.answer.trim()}`];
       }
     }
-    const allRefs = await getDb().query.referenceDocs.findMany();
-    const refs = pickRefs(allRefs, k.grantId, ["feedback", "data"]);
-    const rev = await applyRevision(k.chapters ?? [], latest.issues ?? [], chapterAnswers, refs);
+    const rev = await applyRevision(k.chapters ?? [], latest.issues ?? [], chapterAnswers);
     await snapshotChapters(input.caseId, k.chapters ?? [], rev.chapters, "修改迴圈");
     await getDb().update(cases).set({ chapters: rev.chapters }).where(eq(cases.id, input.caseId));
 
     const round = k.reviewRound + 1;
     const out = runReview(rev.chapters, k.rubricSnapshot ?? [], round);
-    const summary = await aiSummary(rev.chapters, out.dimensions, out.issues, k.rubricSnapshot ?? []);
+    const quality = await proposalQualityForCase(k, rev.chapters);
+    const provenanceIssues = quality.unsupportedClaims.map((claim, index) => ({
+      id: `r${round}_fact${index}`,
+      severity: "high" as const,
+      dimension: "evidence",
+      chapterKey: claim.chapterKey,
+      location: `「${claim.chapterTitle}」`,
+      problem: `數字主張「${claim.claim}」在客戶資料、問卷、公告與參考資料中找不到來源`,
+      suggestion: "請向客戶確認數字並補入問卷或參考資料；若無法證實，請刪除或標記【待補】",
+      status: "open" as const,
+    }));
+    const issues = [...out.issues, ...provenanceIssues];
+    const passed = out.totalScore >= k.targetScore && quality.canAdvanceToHumanReview;
+    const summary = await aiSummary(rev.chapters, out.dimensions, issues, k.rubricSnapshot ?? []);
     await getDb().insert(reviews).values({
       caseId: input.caseId,
       round,
       totalScore: out.totalScore,
       dimensions: out.dimensions,
-      issues: out.issues,
+      issues,
       note: rev.changeLog.join("\n"),
       aiSummary: summary,
     });
     await getDb().update(cases).set({
       currentScore: out.totalScore,
       reviewRound: round,
-      status: out.totalScore >= k.targetScore ? "done" : "reviewing",
+      status: passed ? "done" : "reviewing",
     }).where(eq(cases.id, input.caseId));
     return {
       changeLog: rev.changeLog,
       usedAI: rev.usedAI,
       ...out,
+      issues,
       round,
       targetScore: k.targetScore,
-      passed: out.totalScore >= k.targetScore,
+      passed,
+      qualityGate: {
+        unsupportedClaims: quality.unsupportedClaims,
+        pendingCount: quality.pendingCount,
+        missingRequired: quality.missingRequired,
+      },
       aiSummary: summary,
     };
   }),

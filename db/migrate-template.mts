@@ -1,4 +1,4 @@
-import { getDb } from "/mnt/agents/output/app/api/queries/connection";
+import { getDb } from "../api/queries/connection";
 import { sql } from "drizzle-orm";
 async function main() {
   const db = getDb();

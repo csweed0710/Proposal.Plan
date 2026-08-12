@@ -1,8 +1,9 @@
 import { Link } from "react-router";
-import { ArrowRight, Landmark, Users, FolderKanban, Target, Clock, Trophy, AlertTriangle } from "lucide-react";
+import { ArrowRight, Landmark, Users, FolderKanban, Target, Clock, Trophy, AlertTriangle, CheckCircle2, Circle } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { PageHeader, StatCard, ScoreBadge, deadlineText } from "@/components/bits";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { CASE_STATUSES, CASE_STATUS_LABELS, type CaseStatus } from "@contracts/types";
 
 const DAY = 86400000;
@@ -58,38 +59,59 @@ export default function Dashboard() {
     done: "text-emerald-600",
   };
 
+  const setupSteps = [
+    { label: "建立第一位客戶", to: "/clients/new", done: (s?.clientCount ?? 0) > 0 },
+    { label: "新增或匯入補助案", to: "/grants", done: (s?.grantCount ?? 0) > 0 },
+    { label: "執行適配分析", to: "/match", done: all.length > 0 },
+    { label: "建立第一個案件", to: "/cases", done: all.length > 0 },
+  ];
+  const showSetup = Boolean(s && caseList.data && setupSteps.some((step) => !step.done));
+
   return (
     <div>
       <PageHeader title="總覽" desc="今天該做什麼、哪案快截止、賺了多少——一眼看清" />
 
+      {showSetup && (
+        <Card className="mb-6 border-accent/30 bg-accent/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">開始使用</CardTitle>
+            <p className="text-sm text-muted-foreground">依序完成這四步，就能從客戶資料一路走到正式提案案件。</p>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {setupSteps.map((step, index) => (
+              <Button key={step.label} variant="outline" asChild className="h-auto min-h-11 justify-start py-3 whitespace-normal bg-background">
+                <Link to={step.to} aria-label={`${step.done ? "已完成" : "尚未完成"}：${step.label}`}>
+                  {step.done
+                    ? <CheckCircle2 className="size-4 text-emerald-600" aria-hidden="true" />
+                    : <Circle className="size-4 text-muted-foreground" aria-hidden="true" />}
+                  <span>{index + 1}. {step.label}</span>
+                </Link>
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* 四張關鍵數字卡 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard
-          label="進行中案件"
-          value={caseList.data ? active.length : "…"}
-          sub={`撰稿中 ${countOf("draft", "writing")}・審核中 ${countOf("reviewing", "review")}`}
-        />
-        <StatCard
-          label="達標待送件"
-          value={caseList.data ? readyToSubmit.length : "…"}
-          sub="完成了就趕快送！"
-        />
-        <StatCard
-          label="得標案件"
-          value={caseList.data ? won.length : "…"}
-          sub={wonTotal > 0 ? `累計核定 NT$ ${wonTotal.toLocaleString()}` : "第一件得標就在眼前"}
-        />
-        <StatCard
-          label="30 天內案件截止"
-          value={caseList.data && grants.data ? closing30 : "…"}
-          sub="需要立刻動的案件"
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <Link to="/cases" aria-label="查看進行中案件" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <StatCard label="進行中案件" value={caseList.data ? active.length : "載入中"} sub={`撰稿中 ${countOf("draft", "writing")}・審核中 ${countOf("reviewing", "review")}`} />
+        </Link>
+        <Link to="/cases" aria-label="查看達標待送件案件" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <StatCard label="達標待送件" value={caseList.data ? readyToSubmit.length : "載入中"} sub="完成了就趕快送！" />
+        </Link>
+        <Link to="/cases" aria-label="查看得標案件" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <StatCard label="得標案件" value={caseList.data ? won.length : "載入中"} sub={wonTotal > 0 ? `累計核定 NT$ ${wonTotal.toLocaleString()}` : "第一件得標就在眼前"} />
+        </Link>
+        <Link to="/cases" aria-label="查看三十天內截止案件" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <StatCard label="30 天內案件截止" value={caseList.data && grants.data ? closing30 : "載入中"} sub="需要立刻動的案件" />
+        </Link>
       </div>
 
       {/* 案件 pipeline 條 */}
       <Card className="mb-6">
-        <CardContent className="py-4">
-          <div className="flex flex-wrap items-center gap-y-2">
+        <CardContent className="py-4 overflow-x-auto">
+          <div className="flex min-w-max items-center gap-y-2">
             {CASE_STATUSES.map((st, i) => (
               <div key={st.key} className="flex items-center">
                 {i > 0 && <span className="mx-2 text-muted-foreground/40 text-xs">→</span>}
@@ -116,7 +138,7 @@ export default function Dashboard() {
               <Clock className="w-4 h-4 text-accent" /> 案件截止倒數
             </CardTitle>
             <Link to="/cases" className="text-xs text-accent flex items-center gap-1 hover:underline">
-              全部 <ArrowRight className="w-3 h-3" />
+              查看全部案件 <ArrowRight className="w-3 h-3" />
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -164,11 +186,16 @@ export default function Dashboard() {
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">近期案件</CardTitle>
             <Link to="/cases" className="text-xs text-accent flex items-center gap-1 hover:underline">
-              全部 <ArrowRight className="w-3 h-3" />
+              查看全部案件 <ArrowRight className="w-3 h-3" />
             </Link>
           </CardHeader>
           <CardContent className="space-y-3">
-            {recent.length === 0 && <div className="text-sm text-muted-foreground">尚無案件，到「適配分析」建立第一案。</div>}
+            {recent.length === 0 && (
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>尚無案件，先為客戶找出最適合的補助案。</p>
+                <Button size="sm" variant="outline" asChild><Link to="/match">立即執行適配分析</Link></Button>
+              </div>
+            )}
             {recent.map((k) => (
               <Link key={k.id} to={`/cases/${k.id}`} className="flex items-center justify-between gap-3 p-3 rounded-lg hover:bg-secondary transition-colors">
                 <div className="min-w-0">
@@ -197,7 +224,7 @@ export default function Dashboard() {
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">即將截止的補助案</CardTitle>
             <Link to="/grants" className="text-xs text-accent flex items-center gap-1 hover:underline">
-              全部 <ArrowRight className="w-3 h-3" />
+              查看全部補助案 <ArrowRight className="w-3 h-3" />
             </Link>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -215,7 +242,7 @@ export default function Dashboard() {
         </Card>
 
         {/* 快速入口 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
             { to: "/grants", icon: Landmark, title: "補助情報", desc: "維護章節格式與評分標準" },
             { to: "/clients", icon: Users, title: "客戶資料庫", desc: "下一案自動帶入" },

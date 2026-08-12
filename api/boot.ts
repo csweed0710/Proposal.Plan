@@ -5,8 +5,20 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
+import { hasValidBasicAuth, isPublicRequest } from "./access";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
+
+app.use("*", async (c, next) => {
+  if (!env.accessPassword || isPublicRequest(c.req.path)) return next();
+
+  if (hasValidBasicAuth(c.req.header("Authorization"), env.accessUsername, env.accessPassword)) {
+    return next();
+  }
+
+  c.header("WWW-Authenticate", 'Basic realm="Proposal Plan", charset="UTF-8"');
+  return c.text("需要登入才能存取計畫書接案系統", 401);
+});
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.use("/api/trpc/*", async (c) => {
@@ -29,6 +41,9 @@ if (env.isProduction) {
   const port = parseInt(process.env.PORT || "3000");
   serve({ fetch: app.fetch, port }, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    if (!env.accessPassword) {
+      console.warn("[security] APP_ACCESS_PASSWORD is not configured; the management interface is public.");
+    }
   });
 
   // 補助雷達：每 6 小時背景掃描一次；失敗只記錄，不影響服務
