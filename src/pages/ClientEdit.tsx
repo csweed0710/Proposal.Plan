@@ -84,25 +84,29 @@ export default function ClientEdit() {
       <Card className="mb-6">
         <CardHeader><CardTitle className="text-base">組織資料</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-2"><Label>組織全名</Label><Input value={form.name} onChange={(e) => set("name", e.target.value)} /></div>
+          <div className="md:col-span-2">
+            <Label htmlFor="client-name">組織全名 <span aria-hidden="true" className="text-destructive">*</span></Label>
+            <Input id="client-name" required aria-describedby="client-name-help" value={form.name} onChange={(e) => set("name", e.target.value)} />
+            {!form.name && <p id="client-name-help" className="mt-1 text-xs text-muted-foreground">填寫組織全名後即可建立客戶。</p>}
+          </div>
           <div>
-            <Label>組織型態</Label>
+            <Label htmlFor="client-org-type">組織型態</Label>
             <Select value={form.orgType} onValueChange={(v) => set("orgType", v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="client-org-type"><SelectValue /></SelectTrigger>
               <SelectContent>{ORG_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
             </Select>
           </div>
-          <div><Label>統一編號／立案字號</Label><Input value={form.taxId} onChange={(e) => set("taxId", e.target.value)} /></div>
-          <div><Label>成立年份</Label><Input type="number" value={form.foundedYear} onChange={(e) => set("foundedYear", e.target.value)} /></div>
-          <div><Label>所在地</Label><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></div>
-          <div><Label>專職人數</Label><Input type="number" value={form.employeesFull} onChange={(e) => set("employeesFull", e.target.value)} /></div>
-          <div><Label>兼職人數</Label><Input type="number" value={form.employeesPart} onChange={(e) => set("employeesPart", e.target.value)} /></div>
-          <div><Label>資本額／基金（元）</Label><Input type="number" value={form.capital} onChange={(e) => set("capital", e.target.value)} /></div>
-          <div><Label>年均營業額（元）</Label><Input type="number" value={form.revenueAvg} onChange={(e) => set("revenueAvg", e.target.value)} /></div>
-          <div className="md:col-span-3"><Label>優勢與特色</Label><Textarea rows={2} value={form.strengths} onChange={(e) => set("strengths", e.target.value)} /></div>
+          <div><Label htmlFor="client-tax-id">統一編號／立案字號</Label><Input id="client-tax-id" value={form.taxId} onChange={(e) => set("taxId", e.target.value)} /></div>
+          <div><Label htmlFor="client-founded-year">成立年份</Label><Input id="client-founded-year" type="number" min="1800" max="2100" value={form.foundedYear} onChange={(e) => set("foundedYear", e.target.value)} /></div>
+          <div><Label htmlFor="client-city">所在地</Label><Input id="client-city" autoComplete="address-level1" value={form.city} onChange={(e) => set("city", e.target.value)} /></div>
+          <div><Label htmlFor="client-employees-full">專職人數</Label><Input id="client-employees-full" type="number" min="0" value={form.employeesFull} onChange={(e) => set("employeesFull", e.target.value)} /></div>
+          <div><Label htmlFor="client-employees-part">兼職人數</Label><Input id="client-employees-part" type="number" min="0" value={form.employeesPart} onChange={(e) => set("employeesPart", e.target.value)} /></div>
+          <div><Label htmlFor="client-capital">資本額／基金（元）</Label><Input id="client-capital" type="number" min="0" value={form.capital} onChange={(e) => set("capital", e.target.value)} /></div>
+          <div><Label htmlFor="client-revenue">年均營業額（元）</Label><Input id="client-revenue" type="number" min="0" value={form.revenueAvg} onChange={(e) => set("revenueAvg", e.target.value)} /></div>
+          <div className="md:col-span-3"><Label htmlFor="client-strengths">優勢與特色</Label><Textarea id="client-strengths" rows={2} value={form.strengths} onChange={(e) => set("strengths", e.target.value)} /></div>
           <div className="md:col-span-3">
-            <Label>領域標籤（用、分隔，適配分析要用）</Label>
-            <Input value={form.tagsText} onChange={(e) => set("tagsText", e.target.value)} placeholder="例如：社區、長照、公益、ESG" />
+            <Label htmlFor="client-tags">領域標籤（用、分隔，適配分析要用）</Label>
+            <Input id="client-tags" value={form.tagsText} onChange={(e) => set("tagsText", e.target.value)} placeholder="例如：社區、長照、公益、ESG" />
           </div>
         </CardContent>
       </Card>
@@ -110,10 +114,10 @@ export default function ClientEdit() {
       <Card className="mb-6">
         <CardHeader><CardTitle className="text-base">聯絡窗口</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div><Label>姓名</Label><Input value={form.contactName} onChange={(e) => set("contactName", e.target.value)} /></div>
-          <div><Label>職稱</Label><Input value={form.contactTitle} onChange={(e) => set("contactTitle", e.target.value)} /></div>
-          <div><Label>電話</Label><Input value={form.contactPhone} onChange={(e) => set("contactPhone", e.target.value)} /></div>
-          <div><Label>Email</Label><Input value={form.contactEmail} onChange={(e) => set("contactEmail", e.target.value)} /></div>
+          <div><Label htmlFor="contact-name">姓名</Label><Input id="contact-name" autoComplete="name" value={form.contactName} onChange={(e) => set("contactName", e.target.value)} /></div>
+          <div><Label htmlFor="contact-title">職稱</Label><Input id="contact-title" autoComplete="organization-title" value={form.contactTitle} onChange={(e) => set("contactTitle", e.target.value)} /></div>
+          <div><Label htmlFor="contact-phone">電話</Label><Input id="contact-phone" type="tel" autoComplete="tel" value={form.contactPhone} onChange={(e) => set("contactPhone", e.target.value)} /></div>
+          <div><Label htmlFor="contact-email">Email</Label><Input id="contact-email" type="email" autoComplete="email" value={form.contactEmail} onChange={(e) => set("contactEmail", e.target.value)} /></div>
         </CardContent>
       </Card>
 
@@ -127,16 +131,20 @@ export default function ClientEdit() {
         <CardContent className="space-y-3">
           {projects.length === 0 && <div className="text-sm text-muted-foreground">實績是適配分析與計畫書「過去實績」章節的彈藥。</div>}
           {projects.map((p, i) => (
-            <div key={i} className="grid grid-cols-12 gap-2 items-center">
+            <div key={i} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
               <Input className="col-span-5" placeholder="計畫名稱" value={p.name}
+                aria-label={`第 ${i + 1} 件實績的計畫名稱`}
                 onChange={(e) => setProjects((ps) => ps.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
               <Input className="col-span-2" placeholder="年度" value={p.year}
+                aria-label={`第 ${i + 1} 件實績的年度`}
                 onChange={(e) => setProjects((ps) => ps.map((x, j) => (j === i ? { ...x, year: e.target.value } : x)))} />
               <Input className="col-span-2" placeholder="經費" value={p.budget}
+                aria-label={`第 ${i + 1} 件實績的經費`}
                 onChange={(e) => setProjects((ps) => ps.map((x, j) => (j === i ? { ...x, budget: e.target.value } : x)))} />
               <Input className="col-span-2" placeholder="成果數據" value={p.outcome}
+                aria-label={`第 ${i + 1} 件實績的成果數據`}
                 onChange={(e) => setProjects((ps) => ps.map((x, j) => (j === i ? { ...x, outcome: e.target.value } : x)))} />
-              <Button variant="ghost" size="icon" className="col-span-1" onClick={() => setProjects((ps) => ps.filter((_, j) => j !== i))}>
+              <Button variant="ghost" size="icon" className="col-span-1" aria-label={`刪除第 ${i + 1} 件實績`} onClick={() => setProjects((ps) => ps.filter((_, j) => j !== i))}>
                 <Trash2 className="w-4 h-4 text-destructive" />
               </Button>
             </div>
@@ -147,15 +155,15 @@ export default function ClientEdit() {
       <Card className="mb-8">
         <CardHeader><CardTitle className="text-base">執行能量與備忘</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 gap-4">
-          <div><Label>行政與核銷能量</Label><Textarea rows={2} value={form.adminCapability} onChange={(e) => set("adminCapability", e.target.value)} /></div>
-          <div><Label>財務狀況</Label><Textarea rows={2} value={form.financialNote} onChange={(e) => set("financialNote", e.target.value)} /></div>
-          <div><Label>內部備忘（只有你看得到）</Label><Textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} /></div>
+          <div><Label htmlFor="client-admin-capability">行政與核銷能量</Label><Textarea id="client-admin-capability" rows={2} value={form.adminCapability} onChange={(e) => set("adminCapability", e.target.value)} /></div>
+          <div><Label htmlFor="client-financial-note">財務狀況</Label><Textarea id="client-financial-note" rows={2} value={form.financialNote} onChange={(e) => set("financialNote", e.target.value)} /></div>
+          <div><Label htmlFor="client-notes">內部備忘（僅限已授權的系統使用者）</Label><Textarea id="client-notes" rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} /></div>
         </CardContent>
       </Card>
 
       <div className="flex gap-3 pb-8 items-center">
         {(create.isError || update.isError) && (
-          <p className="text-sm text-destructive">{(create.error ?? update.error)?.message}</p>
+          <p className="text-sm text-destructive" role="alert">{(create.error ?? update.error)?.message}</p>
         )}
         <Button size="lg" onClick={submit} disabled={!form.name || create.isPending || update.isPending}>
           <Save className="w-4 h-4 mr-1" /> {isNew ? "建立客戶" : "儲存修改"}
