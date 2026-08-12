@@ -131,6 +131,7 @@ export default function CaseDetail() {
 
   const [tab, setTab] = useState("intake");
   const [qa, setQa] = useState<IntakeQuestion[]>([]);
+  const [intakeDirty, setIntakeDirty] = useState(false);
   const [chapters, setChapters] = useState<CaseChapter[]>([]);
   const [activeChapter, setActiveChapter] = useState("");
   const [target, setTarget] = useState("85");
@@ -147,6 +148,7 @@ export default function CaseDetail() {
   useEffect(() => {
     if (k.data) {
       setQa(k.data.intakeQA ?? []);
+      setIntakeDirty(false);
       setChapters(k.data.chapters ?? []);
       setTarget(String(k.data.targetScore));
       if (!activeChapter && (k.data.chapters ?? []).length > 0) {
@@ -161,7 +163,7 @@ export default function CaseDetail() {
   const onErr = (e: { message: string }) => setActionError(e.message);
 
   const saveIntake = trpc.cases.saveIntake.useMutation({
-    onSuccess: () => { setActionError(""); utils.cases.get.invalidate(); },
+    onSuccess: () => { setActionError(""); setIntakeDirty(false); utils.cases.get.invalidate(); },
     onError: onErr,
   });
   const saveChapters = trpc.cases.saveChapters.useMutation({
@@ -250,7 +252,23 @@ export default function CaseDetail() {
 
   const current = chapters.find((c) => c.key === activeChapter);
   const currentDraftQuality = draftQualityByChapter[activeChapter];
+  const currentIntakeGaps = qa.filter((q) =>
+    !q.answer.trim() &&
+    (q.chapterKey === activeChapter || q.chapterKey === "__profile__" || q.chapterKey === "__rubric__")
+  );
   const answeredCount = qa.filter((q) => q.answer.trim()).length;
+
+  const generateCurrentChapter = async () => {
+    if (!current) return;
+    try {
+      if (intakeDirty) {
+        await saveIntake.mutateAsync({ id: caseId, intakeQA: qa });
+      }
+      draft.mutate({ id: caseId, chapterKey: current.key });
+    } catch {
+      // Mutation handlers already surface the actionable error banner.
+    }
+  };
 
   const loopUntilPass = async () => {
     setLooping(true);
@@ -574,9 +592,10 @@ export default function CaseDetail() {
                     <Textarea
                       rows={2}
                       value={q.answer}
-                      onChange={(e) =>
-                        setQa((arr) => arr.map((x) => (x.id === q.id ? { ...x, answer: e.target.value } : x)))
-                      }
+                      onChange={(e) => {
+                        setQa((arr) => arr.map((x) => (x.id === q.id ? { ...x, answer: e.target.value } : x)));
+                        setIntakeDirty(true);
+                      }}
                     />
                   </div>
                 ))}
@@ -634,15 +653,39 @@ export default function CaseDetail() {
                       </Button>
                       <Button
                         variant="outline" size="sm"
-                        disabled={draft.isPending}
-                        onClick={() => draft.mutate({ id: caseId, chapterKey: current.key })}
+                        disabled={draft.isPending || saveIntake.isPending}
+                        onClick={generateCurrentChapter}
                       >
                         <Sparkles className="w-4 h-4 mr-1" />
-                        {draft.isPending ? "生成中…" : current.content.trim() ? "重新生成草稿" : "生成草稿"}
+                        {saveIntake.isPending
+                          ? "先儲存最新問卷…"
+                          : draft.isPending
+                            ? "生成中…"
+                            : current.content.trim()
+                              ? "重新生成草稿"
+                              : "生成草稿"}
                       </Button>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {(intakeDirty || currentIntakeGaps.length > 0) && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 space-y-2">
+                        {intakeDirty && (
+                          <div className="flex items-center gap-2 font-medium">
+                            <Info className="w-4 h-4 text-amber-700" />
+                            問卷有尚未儲存的修改；生成時會先自動儲存，再交給 AI。
+                          </div>
+                        )}
+                        {currentIntakeGaps.length > 0 && (
+                          <div>
+                            這一章仍有 {currentIntakeGaps.length} 題相關問卷未回答；可以先生成，但缺少的內容會標成【待補】。
+                          </div>
+                        )}
+                        <Button variant="outline" size="sm" onClick={() => setTab("intake")}>
+                          查看問卷
+                        </Button>
+                      </div>
+                    )}
                     {/* 結構化表格（預算/進度/KPI 章節） */}
                     {current.tableType && (
                       <div className="rounded-lg border bg-card p-3 space-y-2">
