@@ -7,6 +7,7 @@ function normalizeFact(value: string) {
   return value
     .toLowerCase()
     .replace(/\bpercent(?:age)?\b/g, "%")
+    .replace(/\b(\d{4})-\d{2}-\d{2}\b/g, "$1年$&")
     .replace(/[\s,，]/g, "")
     .replace("％", "%");
 }
