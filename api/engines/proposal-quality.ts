@@ -6,10 +6,20 @@ const FACT_PATTERN = /\d[\d,]*(?:\.\d+)?\s*(?:%|％|萬元|億元|萬|元|人次
 function normalizeFact(value: string) {
   return value
     .toLowerCase()
-    .replace(/\bpercent(?:age)?\b/g, "%")
-    .replace(/\b(\d{4})-\d{2}-\d{2}\b/g, "$1年$&")
     .replace(/[\s,，]/g, "")
-    .replace("％", "%");
+    .replace(/％/g, "%");
+}
+
+/**
+ * 來源必須先拆成獨立的「數值＋單位」事實，再做完整相等比對。
+ * 不能對整段來源使用 includes，否則 1,900 人次會錯誤支持 900 人次。
+ */
+export function extractNumericFacts(sourceMaterials: string[]): Set<string> {
+  const prepared = sourceMaterials.join("\n")
+    .toLowerCase()
+    .replace(/\bpercent(?:age)?\b/g, "%")
+    .replace(/\b(\d{4})-\d{2}-\d{2}\b/g, "$1年");
+  return new Set((prepared.match(FACT_PATTERN) ?? []).map(normalizeFact));
 }
 
 /**
@@ -23,12 +33,17 @@ export function evaluateProposalQuality(
   sourceMaterials: string[],
 ) {
   const review = runReview(chapters, rubric, 0);
-  const source = normalizeFact(sourceMaterials.join("\n"));
+  const sourceFacts = extractNumericFacts(sourceMaterials);
   const unsupportedClaims = chapters.flatMap((chapter) => {
     const claims = chapter.content.match(FACT_PATTERN) ?? [];
-    return [...new Set(claims)]
-      .filter((claim) => !source.includes(normalizeFact(claim)))
-      .map((claim) => ({ chapterKey: chapter.key, chapterTitle: chapter.title, claim }));
+    const uniqueClaims = new Map<string, string>();
+    for (const claim of claims) {
+      const normalized = normalizeFact(claim);
+      if (!uniqueClaims.has(normalized)) uniqueClaims.set(normalized, claim);
+    }
+    return [...uniqueClaims.entries()]
+      .filter(([normalized]) => !sourceFacts.has(normalized))
+      .map(([, claim]) => ({ chapterKey: chapter.key, chapterTitle: chapter.title, claim }));
   });
   const pendingCount = chapters.reduce(
     (total, chapter) => total + (chapter.content.match(/【待補】/g)?.length ?? 0),
