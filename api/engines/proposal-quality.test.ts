@@ -71,6 +71,27 @@ describe("提案品質閘門", () => {
     expect(result.canAdvanceToHumanReview).toBe(false);
   });
 
+  it("不把較大來源數字的一部分誤認為有來源", () => {
+    const content = "執行可行性包含服務流程、人力配置與量化成果，預計服務 900 人次；預期效益包含受益人數、場次與追蹤方式。".repeat(4);
+    const result = evaluateProposalQuality(
+      [chapter(content)],
+      rubric,
+      ["來源資料只記載預計服務 1,900 人次。"],
+    );
+    expect(result.unsupportedClaims.some((item) => item.claim.includes("900 人次"))).toBe(true);
+    expect(result.canAdvanceToHumanReview).toBe(false);
+  });
+
+  it("忽略千分位格式差異但仍要求數值完整相等", () => {
+    const content = "執行可行性包含服務流程、人力配置與量化成果，預計服務 1900 人次；預期效益包含受益人數、場次與追蹤方式。".repeat(4);
+    const result = evaluateProposalQuality(
+      [chapter(content)],
+      rubric,
+      ["來源資料記載預計服務 1,900 人次。"],
+    );
+    expect(result.unsupportedClaims).toEqual([]);
+  });
+
   it("有待補標記時不得進入人工定稿", () => {
     const result = evaluateProposalQuality(
       [chapter("執行可行性與預期效益將依服務流程追蹤。【待補】確認受益人數。".repeat(5))],
