@@ -70,4 +70,23 @@ describe("提案品質閘門", () => {
     expect(result.pendingCount).toBeGreaterThan(0);
     expect(result.canAdvanceToHumanReview).toBe(false);
   });
+
+  it("不把只寫在章節指引、未出現在正文的評分項目誤判為已覆蓋", () => {
+    const result = evaluateProposalQuality(
+      [chapter("本章描述一般性的執行內容，但沒有直接回答官方評分要看的重點。".repeat(8))],
+      rubric,
+      [],
+    );
+    expect(result.uncoveredRubric).toEqual([
+      { item: "執行可行性", points: 50 },
+      { item: "預期效益", points: 50 },
+    ]);
+    expect(result.canAdvanceToHumanReview).toBe(false);
+  });
+
+  it("正文直接回應評分項目後才標示為已覆蓋", () => {
+    const content = "執行可行性包含服務流程與人力配置；預期效益包含受益人數、場次與追蹤方式。".repeat(8);
+    const result = evaluateProposalQuality([chapter(content)], rubric, []);
+    expect(result.uncoveredRubric).toEqual([]);
+  });
 });

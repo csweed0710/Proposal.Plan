@@ -365,8 +365,8 @@ export const caseRouter = createRouter({
       const chapters = (k.chapters ?? []).map((c) =>
         c.key === input.chapterKey ? { ...c, content, status: "draft" as const } : c,
       );
-      const draftedChapter = chapters.find((c) => c.key === input.chapterKey)!;
-      const quality = await proposalQualityForCase(k, [draftedChapter]);
+      // 生成後檢查整份提案，讓使用者立刻知道還有哪些官方評分項目尚未被任何章節回應。
+      const quality = await proposalQualityForCase(k, chapters);
       await snapshotChapters(input.id, k.chapters ?? [], chapters, "AI 起草");
       await getDb().update(cases).set({ chapters, status: "draft" }).where(eq(cases.id, input.id));
       return {
@@ -377,6 +377,7 @@ export const caseRouter = createRouter({
           unsupportedClaims: quality.unsupportedClaims,
           pendingCount: quality.pendingCount,
           missingRequired: quality.missingRequired,
+          uncoveredRubric: quality.uncoveredRubric,
         },
       };
     }),
@@ -563,6 +564,7 @@ export const reviewRouter = createRouter({
         unsupportedClaims: quality.unsupportedClaims,
         pendingCount: quality.pendingCount,
         missingRequired: quality.missingRequired,
+        uncoveredRubric: quality.uncoveredRubric,
       },
       aiSummary: summary,
     };
@@ -629,6 +631,7 @@ export const reviewRouter = createRouter({
         unsupportedClaims: quality.unsupportedClaims,
         pendingCount: quality.pendingCount,
         missingRequired: quality.missingRequired,
+        uncoveredRubric: quality.uncoveredRubric,
       },
       aiSummary: summary,
     };
