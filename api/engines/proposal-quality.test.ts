@@ -19,6 +19,16 @@ function chapter(content: string): CaseChapter {
 }
 
 describe("提案品質閘門", () => {
+  it("將 percent 文字與百分比符號視為同一筆來源事實", () => {
+    const content = "The verified satisfaction rate is 92%. ".repeat(8);
+    const result = evaluateProposalQuality(
+      [chapter(content)],
+      rubric,
+      ["The source survey reports a 92 percent satisfaction rate."],
+    );
+    expect(result.unsupportedClaims).toEqual([]);
+  });
+
   it("接受有來源支撐的量化主張", () => {
     const content = "執行可行性將透過固定服務流程與人力配置落實。每月辦理 2 場活動，全年共 24 場，預計服務 480 人次；預期效益以簽到表及前後測追蹤。".repeat(3);
     const result = evaluateProposalQuality(
