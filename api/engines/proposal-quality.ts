@@ -4,7 +4,11 @@ import { runReview } from "./review";
 const FACT_PATTERN = /\d[\d,]*(?:\.\d+)?\s*(?:%|％|萬元|億元|萬|元|人次|人|場次|場|案|家|年|月|小時)/g;
 
 function normalizeFact(value: string) {
-  return value.replace(/[\s,，]/g, "").replace("％", "%");
+  return value
+    .toLowerCase()
+    .replace(/\bpercent(?:age)?\b/g, "%")
+    .replace(/[\s,，]/g, "")
+    .replace("％", "%");
 }
 
 /**
