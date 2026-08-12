@@ -32,6 +32,7 @@ type ChapterDraftQuality = {
   unsupportedClaims: Array<{ chapterKey: string; chapterTitle: string; claim: string }>;
   pendingCount: number;
   missingRequired: string[];
+  uncoveredRubric: Array<{ item: string; points: number }>;
 };
 
 function DimBar({ d }: { d: ReviewDimension }) {
@@ -730,7 +731,7 @@ export default function CaseDetail() {
                       placeholder={current.tableType ? "表格之外的補充說明文字（如經費編列原則、指標設定理念）…" : "從右上的「生成草稿」開始，或直接撰寫／貼上內容。"}
                     />
                     {currentDraftQuality && (
-                      currentDraftQuality.unsupportedClaims.length > 0 || currentDraftQuality.pendingCount > 0 || currentDraftQuality.missingRequired.length > 0 ? (
+                      currentDraftQuality.unsupportedClaims.length > 0 || currentDraftQuality.pendingCount > 0 || currentDraftQuality.missingRequired.length > 0 || currentDraftQuality.uncoveredRubric.length > 0 ? (
                         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 space-y-2">
                           <div className="font-semibold flex items-center gap-2">
                             <AlertTriangle className="w-4 h-4 text-amber-700" />
@@ -748,7 +749,15 @@ export default function CaseDetail() {
                             </div>
                           )}
                           {currentDraftQuality.missingRequired.length > 0 && (
-                            <div>必要章節內容仍不足 120 字。</div>
+                            <div>必要章節內容仍不足 120 字：{currentDraftQuality.missingRequired.join("、")}。</div>
+                          )}
+                          {currentDraftQuality.uncoveredRubric.length > 0 && (
+                            <div>
+                              整份提案尚未在正文直接回應的評分項目：
+                              <span className="font-medium ml-1">
+                                {currentDraftQuality.uncoveredRubric.map((item) => `${item.item}（${item.points} 分）`).join("、")}
+                              </span>
+                            </div>
                           )}
                           <Button variant="outline" size="sm" onClick={() => setTab("intake")}>
                             回問卷補資料
@@ -757,7 +766,7 @@ export default function CaseDetail() {
                       ) : (
                         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-center gap-2">
                           <CircleCheck className="w-4 h-4" />
-                          數字來源檢查通過，且沒有【待補】標記。
+                          數字來源、必要章節與評分標準覆蓋檢查均通過。
                         </div>
                       )
                     )}

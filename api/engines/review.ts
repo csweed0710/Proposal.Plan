@@ -28,11 +28,45 @@ interface DimResult {
   issues: Omit<ReviewIssue, "id" | "status">[];
 }
 
+export interface RubricCoverageItem {
+  item: string;
+  points: number;
+  covered: boolean;
+  matchedChapterKeys: string[];
+}
+
 function clamp(n: number) {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 // ---- 面向一：評分標準對應 ------------------------------------------------
+/**
+ * 評分項目必須實際出現在正文中才算覆蓋。
+ * 章名與寫作指引只是在告訴作者該寫什麼，不能當成已完成的證據。
+ */
+export function evaluateRubricCoverage(
+  chapters: CaseChapter[],
+  rubric: RubricItem[],
+): RubricCoverageItem[] {
+  return rubric.map((r) => {
+    const keys = [r.item, ...r.description.split(/[，、；：:。\s]/)]
+      .map((key) => key.trim())
+      .filter((key, index, all) => key.length >= 2 && all.indexOf(key) === index);
+    const matchedChapterKeys = chapters
+      .filter((chapter) =>
+        chapter.content.trim().length >= 120 &&
+        keys.some((key) => chapter.content.includes(key)),
+      )
+      .map((chapter) => chapter.key);
+    return {
+      item: r.item,
+      points: r.points,
+      covered: matchedChapterKeys.length > 0,
+      matchedChapterKeys,
+    };
+  });
+}
+
 function dimRubric(chapters: CaseChapter[], rubric: RubricItem[]): DimResult {
   const issues: DimResult["issues"] = [];
   if (rubric.length === 0) {
@@ -43,19 +77,17 @@ function dimRubric(chapters: CaseChapter[], rubric: RubricItem[]): DimResult {
   }
   const total = rubric.reduce((s, r) => s + r.points, 0) || 100;
   let covered = 0;
-  for (const r of rubric) {
-    const keys = [r.item, ...r.description.split(/[，、；\s]/).filter((w) => w.length >= 2)];
-    const hits = chapters.filter(
-      (ch) => ch.content.length >= 120 && keys.some((k) => k.length >= 2 && (ch.content.includes(k) || (ch.title + ch.guidance).includes(k))),
-    );
-    if (hits.length > 0) {
-      covered += r.points;
+  const coverage = evaluateRubricCoverage(chapters, rubric);
+  for (const result of coverage) {
+    const r = rubric.find((item) => item.item === result.item)!;
+    if (result.covered) {
+      covered += result.points;
     } else {
       issues.push({
-        severity: r.points >= 20 ? "high" : "mid",
+        severity: result.points >= 20 ? "high" : "mid",
         dimension: "rubric",
         chapterKey: "ALL",
-        location: `評分項目「${r.item}」（${r.points} 分）`,
+        location: `評分項目「${result.item}」（${result.points} 分）`,
         problem: `計畫書中找不到足以對應「${r.item}」的內容（${r.description || "評分重點未涵蓋"}）`,
         suggestion: r.description
           ? `回到章節中補上與「${r.item}」直接相關的段落——${r.description}，並用具體數據或做法呈現`

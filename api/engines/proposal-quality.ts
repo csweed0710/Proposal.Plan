@@ -1,5 +1,5 @@
 import type { CaseChapter, RubricItem } from "../../contracts/types";
-import { runReview } from "./review";
+import { evaluateRubricCoverage, runReview } from "./review";
 
 const FACT_PATTERN = /\d[\d,]*(?:\.\d+)?\s*(?:%|％|萬元|億元|萬|元|人次|人|場次|場|案|家|年|月|小時)/g;
 
@@ -38,6 +38,9 @@ export function evaluateProposalQuality(
     .filter((chapter) => chapter.required && chapter.content.trim().length < 120)
     .map((chapter) => chapter.title);
   const highIssues = review.issues.filter((issue) => issue.severity === "high");
+  const uncoveredRubric = evaluateRubricCoverage(chapters, rubric)
+    .filter((item) => !item.covered)
+    .map(({ item, points }) => ({ item, points }));
 
   return {
     score: review.totalScore,
@@ -46,11 +49,13 @@ export function evaluateProposalQuality(
     unsupportedClaims,
     pendingCount,
     missingRequired,
+    uncoveredRubric,
     canAdvanceToHumanReview:
       review.totalScore >= 75 &&
       highIssues.length === 0 &&
       unsupportedClaims.length === 0 &&
       pendingCount === 0 &&
-      missingRequired.length === 0,
+      missingRequired.length === 0 &&
+      uncoveredRubric.length === 0,
   };
 }
