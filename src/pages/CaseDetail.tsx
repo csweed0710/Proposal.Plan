@@ -28,6 +28,12 @@ const SEV = {
   low: { label: "低", cls: "bg-gray-100 text-gray-600" },
 } as const;
 
+type ChapterDraftQuality = {
+  unsupportedClaims: Array<{ chapterKey: string; chapterTitle: string; claim: string }>;
+  pendingCount: number;
+  missingRequired: string[];
+};
+
 function DimBar({ d }: { d: ReviewDimension }) {
   return (
     <div>
@@ -163,9 +169,13 @@ export default function CaseDetail() {
     onError: onErr,
   });
   const draft = trpc.cases.draftChapter.useMutation({
-    onSuccess: (d) => {
+    onSuccess: (d, variables) => {
       setActionError("");
       utils.cases.get.invalidate();
+      setDraftQualityByChapter((current) => ({
+        ...current,
+        [variables.chapterKey]: d.qualityGate,
+      }));
       setDraftInfo(
         d.usedAI
           ? `AI 已生成草稿${d.usedRefs ? `，引用 ${d.usedRefs} 份參考資料` : ""}`
@@ -211,6 +221,7 @@ export default function CaseDetail() {
   const [versionsOpen, setVersionsOpen] = useState(false);
   // 草稿生成結果提示
   const [draftInfo, setDraftInfo] = useState<string | null>(null);
+  const [draftQualityByChapter, setDraftQualityByChapter] = useState<Record<string, ChapterDraftQuality>>({});
   // 客戶自填連結
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
@@ -238,6 +249,7 @@ export default function CaseDetail() {
     (chapters.find((c) => c.key === key)?.title ?? key);
 
   const current = chapters.find((c) => c.key === activeChapter);
+  const currentDraftQuality = draftQualityByChapter[activeChapter];
   const answeredCount = qa.filter((q) => q.answer.trim()).length;
 
   const loopUntilPass = async () => {
@@ -664,11 +676,48 @@ export default function CaseDetail() {
                     <Textarea
                       rows={current.tableType ? 9 : 16}
                       value={current.content}
-                      onChange={(e) =>
-                        setChapters((cs) => cs.map((x) => (x.key === current.key ? { ...x, content: e.target.value, status: "draft" } : x)))
-                      }
+                      onChange={(e) => {
+                        setChapters((cs) => cs.map((x) => (x.key === current.key ? { ...x, content: e.target.value, status: "draft" } : x)));
+                        setDraftQualityByChapter((quality) => {
+                          const next = { ...quality };
+                          delete next[current.key];
+                          return next;
+                        });
+                      }}
                       placeholder={current.tableType ? "表格之外的補充說明文字（如經費編列原則、指標設定理念）…" : "從右上的「生成草稿」開始，或直接撰寫／貼上內容。"}
                     />
+                    {currentDraftQuality && (
+                      currentDraftQuality.unsupportedClaims.length > 0 || currentDraftQuality.pendingCount > 0 || currentDraftQuality.missingRequired.length > 0 ? (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 space-y-2">
+                          <div className="font-semibold flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-amber-700" />
+                            這一章還需要補資料，暫時不要送審
+                          </div>
+                          {currentDraftQuality.pendingCount > 0 && (
+                            <div>草稿中有 {currentDraftQuality.pendingCount} 處【待補】標記。</div>
+                          )}
+                          {currentDraftQuality.unsupportedClaims.length > 0 && (
+                            <div>
+                              尚未找到來源的數字：
+                              <span className="font-medium ml-1">
+                                {currentDraftQuality.unsupportedClaims.map((item) => item.claim).join("、")}
+                              </span>
+                            </div>
+                          )}
+                          {currentDraftQuality.missingRequired.length > 0 && (
+                            <div>必要章節內容仍不足 120 字。</div>
+                          )}
+                          <Button variant="outline" size="sm" onClick={() => setTab("intake")}>
+                            回問卷補資料
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-center gap-2">
+                          <CircleCheck className="w-4 h-4" />
+                          數字來源檢查通過，且沒有【待補】標記。
+                        </div>
+                      )
+                    )}
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs text-muted-foreground">{current.content.trim().length} 字</span>
                       {draftInfo && (
