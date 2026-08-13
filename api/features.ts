@@ -11,7 +11,7 @@ import { generateIntake } from "./engines/intake";
 import { draftChapter } from "./engines/writer";
 import { runReview, aiSummary } from "./engines/review";
 import { applyRevision } from "./engines/revise";
-import { pickRefs, docxToText } from "./engines/reference";
+import { pickRefs, docxToText, numericEvidenceMaterials } from "./engines/reference";
 import { llmStatus } from "./llm";
 import { exportCase } from "./engines/exporter";
 import { docxToPdf } from "./engines/pdf";
@@ -109,7 +109,7 @@ async function proposalQualityForCase(
     JSON.stringify(grant ?? {}, (key, value) => key === "templateData" ? undefined : value),
     ...(k.intakeQA ?? []).map((q) => `${q.question}\n${q.answer}`),
     ...chapters.map(chapterTableContext).filter(Boolean),
-    ...relevantRefs.map((ref) => (ref.textContent ?? "").slice(0, 50000)),
+    ...numericEvidenceMaterials(relevantRefs),
   ];
   return evaluateProposalQuality(chapters, k.rubricSnapshot ?? [], sourceMaterials);
 }

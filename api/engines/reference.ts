@@ -24,6 +24,17 @@ export function pickRefs(all: RefDocInput[], grantId: number, kinds: RefKind[]):
   return all.filter((d) => kinds.includes(d.kind as RefKind) && (d.grantId === grantId || d.grantId == null));
 }
 
+/**
+ * 只有明確分類為「數據文獻」的參考資料，能替提案中的量化主張背書。
+ * 得標範本、委員意見與評分文件只用於學習結構或回應要求，不能讓別案數字
+ * 通過本案的來源檢核。
+ */
+export function numericEvidenceMaterials(refs: RefDocInput[]): string[] {
+  return refs
+    .filter((ref) => ref.kind === "data" && ref.textContent?.trim())
+    .map((ref) => ref.textContent!.slice(0, 50000));
+}
+
 /** 把參考資料組成提示文字（已依類型限量裁切） */
 export function refsPrompt(refs: RefDocInput[]): { text: string; used: number } {
   const blocks: string[] = [];

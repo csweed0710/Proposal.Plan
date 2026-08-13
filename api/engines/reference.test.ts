@@ -1,7 +1,7 @@
 // 參考資料引擎測試：挑選邏輯、提示組裝、docx 文字抽取
 import { describe, it, expect } from "vitest";
 import { Document, Packer, Paragraph, TextRun } from "docx";
-import { pickRefs, refsPrompt, docxToText } from "./reference";
+import { pickRefs, refsPrompt, docxToText, numericEvidenceMaterials } from "./reference";
 
 const doc = (patch: Record<string, unknown>) => ({
   title: "文件", kind: "example", grantId: 1, textContent: "內容", note: null, ...patch,
@@ -52,6 +52,28 @@ describe("refsPrompt：依類型限量裁切並加標籤", () => {
     const { text, used } = refsPrompt([doc({ textContent: "  " })] as never);
     expect(used).toBe(0);
     expect(text).toBe("");
+  });
+});
+
+describe("numericEvidenceMaterials：只信任可引用的數據文獻", () => {
+  it("排除得標範本、委員意見與評分文件中的別案數字", () => {
+    const refs = [
+      doc({ title: "別案範本", kind: "example", textContent: "服務 900 人次" }),
+      doc({ title: "委員意見", kind: "feedback", textContent: "建議提高到 700 人次" }),
+      doc({ title: "評分文件", kind: "rubric_doc", textContent: "量化成果占 20 分" }),
+      doc({ title: "官方統計", kind: "data", textContent: "2025 年服務需求為 480 人次" }),
+    ];
+
+    expect(numericEvidenceMaterials(refs as never)).toEqual([
+      "2025 年服務需求為 480 人次",
+    ]);
+  });
+
+  it("忽略沒有文字內容的數據文件", () => {
+    expect(numericEvidenceMaterials([
+      doc({ kind: "data", textContent: "  " }),
+      doc({ kind: "data", textContent: null }),
+    ] as never)).toEqual([]);
   });
 });
 
